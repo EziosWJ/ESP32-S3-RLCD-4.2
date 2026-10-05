@@ -4,9 +4,35 @@
 
 ## 当前工程状态
 
-工程已建立基础启动程序和板级参数。上电后通过 USB Serial/JTAG 输出 SDK 版本、芯片信息、Flash 和 PSRAM 容量，并每 5 秒输出一次可用内存信息。
+工程已接入 **SHTC3 温湿度读取和 RLCD 显示**。上电后通过 USB Serial/JTAG 输出 SDK、芯片和内存信息，然后每 **2 秒**采样一次，在 **400 × 300 横屏**上显示温度（°C）和相对湿度（%RH），保留一位小数。
 
-当前尚未初始化屏幕、按键、I²C、音频、SD 卡、Wi-Fi 或 BLE，也尚未引入 LVGL / U8g2。板级引脚常量集中在 `main/board_config.h`，方便后续驱动使用。
+屏幕使用内置黑白点阵字体，显示英文标签 `TEMPERATURE` 和 `HUMIDITY`；无需 LVGL / U8g2 或额外下载库。读取失败或 CRC 校验失败时，数值变为 `--.-`，底部显示 `SENSOR ERROR - RETRYING`，之后继续采样，不把旧值作为当前数据展示。按键、音频、SD 卡、Wi-Fi、BLE 和 RTC 尚未接入。
+
+### 温湿度采样与显示配置
+
+板级参数集中在 `main/board_config.h`：
+
+| 配置 | 当前值 |
+| --- | --- |
+| SHTC3 地址 | `0x70`（7 bit 地址） |
+| I²C 控制器 / 时钟 | I²C 0 / 400 kHz |
+| I²C SDA / SCL | GPIO 13 / 14 |
+| RLCD 控制器 / 时钟 | SPI3 / 10 MHz，mode 0 |
+| 显示方向 | 横屏 400 × 300 |
+| 采样间隔 | `BOARD_SAMPLE_INTERVAL_MS = 2000` |
+| 温度补偿 | `BOARD_TEMPERATURE_OFFSET_C = (-4.0f)`，与 demo 一致 |
+
+SHTC3 采用唤醒 `0x3517` → 普通模式测量 `0x7866`（温度先返回、不使用时钟拉伸）→ 等待至少 20 ms → 读取 6 字节 → 休眠 `0xB098` 的流程，分别校验温度和湿度数据的 CRC-8（初始值 `0xFF`、多项式 `0x31`）。成功和失败的测量都会尝试让传感器返回休眠状态。
+
+换算公式：`T = -45 + 175 × rawT / 65536 + offset`；`RH = 100 × rawRH / 65536`。按用户要求，本工程与本地出厂示例一致，温度固定减去 4°C，屏幕与串口均显示补偿后的温度；湿度不添加偏移。调整 `BOARD_TEMPERATURE_OFFSET_C` 后需重新编译并烧录。
+
+屏幕初始化寄存器、复位时序和横屏像素排列参考用户指定的本地示例：
+
+```text
+D:\workspace\ESP32\ESP32-S3-RLCD-4.2-Demo\02_ESP-IDF\10_FactoryProgram
+```
+
+主要参考文件为 `main/main.cpp`、`main/user_config.h`、`components/port_bsp/display_bsp.cpp` 和 `components/port_bsp/i2c_equipment.*`。该示例的 `user_config.h` 写的是 300 × 400，但 `main.cpp` 实际传给显示驱动的是 **400 × 300**；本工程采用后者，并保留本地版本的屏幕初始化参数。TE 引脚当前未使用。
 
 ## 设备情况
 
@@ -33,7 +59,7 @@
 
 RLCD 利用环境光反射成像，没有背光；环境越明亮，显示越清晰。官方显示驱动使用黑白 1 bit 像素，一屏帧缓冲为 `300 × 400 / 8 = 15,000` 字节。像素需要按控制器格式排列，不能直接发送普通 RGB 图片缓冲。官方 LVGL 示例会将绘制结果转换为黑白像素。
 
-官方提供 LVGL 8、LVGL 9 和 U8g2 示例。后续接入时需要匹配对应版本及驱动；当前工程尚未选定图形库。
+官方提供 LVGL 8、LVGL 9 和 U8g2 示例。本工程目前直接绘制黑白点阵文本，使用 15,000 字节的内部 DMA 帧缓冲和同步 SPI 传输，发送完成后才更新下一帧，避免传输过程中修改缓冲区。
 
 参考：[官方显示驱动](https://github.com/waveshareteam/ESP32-S3-RLCD-4.2/blob/main/02_Example/ESP-IDF/08_LVGL_V8_Test/components/port_bsp/display_bsp.cpp)及[ESP-IDF 示例说明](https://docs.waveshare.net/ESP32-S3-RLCD-4.2/ESP-IDF/)。
 
@@ -91,7 +117,9 @@ RLCD/
 ├── main/
 │   ├── CMakeLists.txt      # 主组件依赖
 │   ├── board_config.h     # 设备参数和已核对的引脚
-│   └── main.c             # 启动诊断和周期日志
+│   ├── main.c             # 启动诊断、采样循环和温湿度界面
+│   ├── shtc3.c / .h       # ESP-IDF I²C 温湿度驱动和 CRC 校验
+│   └── rlcd.c / .h        # RLCD 初始化、像素排列、字体和同步 SPI 刷新
 ├── .vscode/settings.json  # 本机 SDK、端口和 clangd 配置
 ├── .clangd                # clangd 编译参数设置
 ├── .gitignore
@@ -136,13 +164,15 @@ idf.py save-defconfig
 idf.py size
 ```
 
-基础程序运行时应输出板名、SDK 版本、双核芯片信息、约 16 MB Flash 和 8 MB PSRAM 的实际检测值，以及每 5 秒一次的 `Alive` 日志。屏幕此阶段不会显示新的应用界面。
+程序运行时应先输出板名、SDK 版本、芯片及内存信息。屏幕短暂显示 `READING SENSOR`，随后显示温湿度，底部状态为 `SHTC3  LIVE`。串口每 2 秒输出类似 `Temperature: 25.3 C, humidity: 48.6 %RH` 的实测值。读取失败时串口会记录具体 ESP-IDF 错误，屏幕显示占位符并继续重试。
 
 ## 验证记录
 
 - 初始化日期：2026-10-05。
 - 编译验证：使用本机 ESP-IDF 6.1.0 配置和 Xtensa GCC 15.2.0，通过 `idf.py reconfigure build size`；已核对生成配置中的 12 项板级参数。
-- 构建产物：`build/rlcd.bin`（160,576 字节）、`build/bootloader/bootloader.bin`（22,608 字节）和 `build/partition_table/partition-table.bin`（3,072 字节）。
+- 温湿度显示版本：通过 ESP-IDF 6.1.0 `idf.py build`，构建日志无编译警告或错误；应用固件为 226,736 字节。
+- 示例核对：屏幕初始化的 27 条命令、参数字节和延时与指定本地出厂示例一致；已检查界面正常值、极值和错误状态的文字范围与字体覆盖。
+- 构建产物：`build/rlcd.bin`、`build/bootloader/bootloader.bin` 和 `build/partition_table/partition-table.bin`；固件体积随功能变化，以最新构建为准。
 - 硬件验证：尚未烧录；实际启动、USB 日志及内存检测需上板确认。
 
 ## 官方资源
