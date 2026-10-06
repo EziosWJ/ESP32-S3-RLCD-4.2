@@ -5,6 +5,9 @@
 /sdkconfig.old
 /sdkconfig.old.*
 /rc.key
+/codeck.key
+__pycache__/
+*.pyc
 
 # Editor and operating system temporary files.
 *.swp

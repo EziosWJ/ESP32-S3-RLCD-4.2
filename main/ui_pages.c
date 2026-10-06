@@ -59,7 +59,11 @@ static void sensor_card(int y, const char *name, const char *status,
 void draw_sensor_page(const ui_model_t *m)
 {
     static const char *names[HA_DEVICE_COUNT] = {"LIVING ROOM", "STUDY"};
-    header("HOME ENVIRONMENT");
+    rlcd_text(20, 8, "HOME ENVIRONMENT", 2);
+    rlcd_text(338, 11, m->clock.valid ? "BEIJING" : "NO TIME", 1);
+    rlcd_text(20, 32, m->clock.date, 2);
+    rlcd_text(236, 27, m->clock.time, 3);
+    rlcd_hline(20, 52, 360);
     sensor_card(60, "LOCAL SHTC3", m->valid ? "LIVE" : "READ ERROR",
                 m->valid, m->temperature, m->valid, m->humidity);
     for (unsigned i = 0; i < HA_DEVICE_COUNT; ++i) {
@@ -78,7 +82,7 @@ void draw_network_page(const ui_model_t *m)
     rlcd_text(20, 74, "WIFI", 2);
     rlcd_text(20, 100, network_state(m), 3);
     rlcd_text(20, 142, "DEVICE IP", 2);
-    // The font has no slash/colon; dots and hyphens are supported.
+    // IPv4 addresses use the font's supported digits and dots.
     rlcd_text(20, 168, m->wifi.ip[0] ? m->wifi.ip : "--.--.--.--", 3);
     rlcd_text(20, 212, m->wifi_available && m->wifi.portal_active ?
               "SETUP HOTSPOT ACTIVE" : "SETUP HOTSPOT OFF", 2);
@@ -127,7 +131,7 @@ void draw_setup_page(const ui_model_t *m)
 
 void draw_page_footer(ui_page_t page, bool setup)
 {
-    static const char *labels[] = {"1 OF 3  SENSOR", "2 OF 3  NETWORK", "3 OF 3  SYSTEM"};
+    static const char *labels[] = {"1 OF 4  SENSOR", "2 OF 4  CODECK", "3 OF 4  NETWORK", "4 OF 4  SYSTEM"};
     rlcd_hline(20, 268, 360);
     rlcd_text(20, 277, setup ? "SETUP  KEY TO BROWSE" : labels[page], 1);
     rlcd_text(20, 290, "KEY NEXT  HOLD 3 SECONDS WIFI SETUP", 1);

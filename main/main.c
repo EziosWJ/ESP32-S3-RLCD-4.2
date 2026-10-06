@@ -20,6 +20,8 @@
 #include "shtc3.h"
 #include "wifi_setup.h"
 #include "home_assistant.h"
+#include "clock_service.h"
+#include "codeck_client.h"
 
 static const char *TAG = "rlcd";
 
@@ -56,6 +58,12 @@ void app_main(void)
     if (!wifi_available) {
         ESP_LOGE(TAG, "Wi-Fi setup initialization failed: %s", esp_err_to_name(wifi_err));
     }
+    if (wifi_available) {
+        const esp_err_t clock_err = clock_service_init();
+        if (clock_err != ESP_OK) {
+            ESP_LOGW(TAG, "Clock initialization failed: %s", esp_err_to_name(clock_err));
+        }
+    }
     ESP_ERROR_CHECK(button_init());
     const ui_system_info_t system = {
         .flash_bytes = flash_size,
@@ -68,6 +76,8 @@ void app_main(void)
         if (ha_err != ESP_OK) {
             ESP_LOGW(TAG, "HA initialization failed: %s", esp_err_to_name(ha_err));
         }
+        const esp_err_t codeck_err=codeck_client_init();
+        if(codeck_err!=ESP_OK) ESP_LOGW(TAG,"Codeck initialization failed: %s",esp_err_to_name(codeck_err));
     }
     ESP_ERROR_CHECK(ui_render());
     ESP_ERROR_CHECK(shtc3_init());

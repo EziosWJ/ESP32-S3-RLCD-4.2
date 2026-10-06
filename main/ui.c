@@ -3,10 +3,16 @@
 #include <string.h>
 #include "ui_pages.h"
 #include "rlcd.h"
+#include "codeck_client.h"
+#include "codeck_page.h"
+#include "esp_timer.h"
 
 static ui_page_t current_page;
 static ui_model_t model;
 static bool dirty, setup_visible, portal_was_active;
+static int64_t codeck_entered_at;
+static unsigned codeck_frame;
+static codeck_snapshot_t codeck, codeck_next;
 
 void ui_init(bool wifi_available, const ui_system_info_t *system)
 {
@@ -26,6 +32,10 @@ void ui_set_page(ui_page_t page)
     }
     if (current_page != page || setup_visible) {
         current_page = page;
+        if (page == PAGE_CODECK) {
+            codeck_entered_at = esp_timer_get_time();
+            codeck_frame = 0;
+        }
         setup_visible = false;
         dirty = true;
     }
@@ -90,6 +100,26 @@ esp_err_t ui_render(void)
             dirty = true;
         }
     }
+    clock_display_t clock;
+    clock_service_update(model.wifi_available && model.wifi.state == WIFI_SETUP_CONNECTED, &clock);
+    if (clock.valid != model.clock.valid || strcmp(clock.date, model.clock.date) != 0 ||
+        strcmp(clock.time, model.clock.time) != 0) {
+        model.clock = clock;
+        if (current_page == PAGE_SENSOR && !setup_visible) dirty = true;
+    }
+    if (current_page == PAGE_CODECK && !setup_visible) {
+        codeck_client_get_snapshot(&codeck_next);
+        if(codeck_next.revision!=codeck.revision || codeck_next.status!=codeck.status ||
+           codeck_next.has_snapshot!=codeck.has_snapshot) {
+            codeck=codeck_next; dirty=true;
+        }
+        const unsigned frame = (unsigned)((esp_timer_get_time() - codeck_entered_at) /
+                                           (12LL * 1000 * 1000) % codeck_page_count(&codeck));
+        if (frame != codeck_frame) {
+            codeck_frame = frame;
+            dirty = true;
+        }
+    }
     if (!dirty) {
         return ESP_OK;
     }
@@ -99,12 +129,13 @@ esp_err_t ui_render(void)
     } else {
         switch (current_page) {
         case PAGE_SENSOR: draw_sensor_page(&model); break;
+        case PAGE_CODECK: draw_codeck_page(&codeck,codeck_frame); break;
         case PAGE_NETWORK: draw_network_page(&model); break;
         case PAGE_SYSTEM: draw_system_page(&model); break;
         default: break;
         }
     }
-    draw_page_footer(current_page, setup_visible);
+    if (setup_visible || current_page != PAGE_CODECK) draw_page_footer(current_page, setup_visible);
     const esp_err_t err = rlcd_flush();
     if (err == ESP_OK) {
         dirty = false;

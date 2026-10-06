@@ -8,6 +8,12 @@
 
 屏幕使用内置黑白点阵字体；无需 LVGL / U8g2。温湿度首页显示 **本机 SHTC3、客厅空调、书房空调三张独立卡片**。读取失败或 CRC 校验失败时，本机数值变为 `--.-`，之后继续采样。已接入 **Home Assistant 温湿度读取、Wi-Fi 热点网页配网、NVS 保存、自动重连和 KEY 长按重新配网**；音频、SD 卡、BLE 和 RTC 尚未接入。
 
+### 首页实时时间
+
+首页顶部显示北京时间（UTC+8）的 `YYYY-MM-DD` 日期和 `HH:MM:SS` 时间，每秒刷新，下面保留三张温湿度卡片。获得 Wi-Fi IP 后通过 SNTP 自动校时，重连时重新请求校时；采用 [ESP-IDF 的系统时间接口](https://docs.espressif.com/projects/esp-idf/en/v5.2/esp32s3/api-reference/system/system_time.html)。校时在网络任务中进行，不等待网络响应，也不阻塞按键和传感器采样。
+
+首次校时成功前显示日期占位符、`--:--:--` 和 `NO TIME`；成功后显示 `BEIJING`。校时后断网仍使用系统时钟继续走时；断电重启后需要重新联网校时，当前未接入板载 PCF85063 RTC。NTP 服务器默认为 `ntp.aliyun.com`，服务器和时区可通过 `main/board_config.h` 中的 `BOARD_NTP_SERVER`、`BOARD_TIMEZONE` 修改；网络需允许 DNS 和 NTP（UDP 123）。
+
 ### Home Assistant 温湿度卡片
 
 三张卡片从上到下为 `LOCAL SHTC3`（本机）、`LIVING ROOM`（客厅）和 `STUDY`（书房），左侧温度，右侧相对湿度。内置字体暂不支持中文和度数符号，因此屏幕使用 `C` 表示摄氏度。网络和系统页面仍通过 KEY 短按切换。
@@ -34,16 +40,97 @@ python tests/test_ha_state.py --zig <zig.exe路径>
 
 ### 页面切换
 
-已加入三个固定布局页面：温湿度、网络状态、系统信息。温湿度继续每 2 秒采样，网络页显示当前状态和 IP，系统页显示芯片、Flash、PSRAM 和显示尺寸。
+已加入四个页面：温湿度、Codeck 实时快照、网络状态、系统信息。温湿度继续每 2 秒采样，网络页显示当前状态和 IP，系统页显示芯片、Flash、PSRAM 和显示尺寸。
 
-- **KEY 短按并释放**：温湿度 → 网络 → 系统信息 → 温湿度，底部显示当前页码。
+- **KEY 短按并释放**：温湿度 → Codeck → 网络 → 系统信息 → 温湿度，底部显示当前页码。
 - **KEY 长按 3 秒**：进入 Wi-Fi 配网页；长按释放不会再切换页面。
 - 首次未配网时自动显示配网页，短按返回温湿度页，再短按循环浏览。浏览不会关闭配网热点；长按可再次显示配网提示。
 - 配网成功后自动退出配网页，恢复之前选择的普通页面。
 
 页面状态与刷新在 `main/ui.c`，各页面绘制在 `main/ui_pages.c`，按键消抖与短按/长按识别在 `main/button.c`。主任务每 20 ms 轮询，消抖 40 ms；切页使用缓存数据重绘，不等待 2 秒采样周期。所有绘制和 SPI 刷新仍由主任务执行。
 
-烧录后建议检查：连续短按循环三页 → 长按显示配网页 → 松开不跳页 → 配网页短按浏览 → 配网成功恢复页面。页面采用现有英文点阵字体，暂未加入动画和交互菜单。
+烧录后建议检查：连续短按循环四页 → 长按显示配网页 → 松开不跳页 → 配网页短按浏览 → 配网成功恢复页面。页面采用现有英文点阵字体。
+
+### Codeck 实时快照
+
+设备只调用 `GET https://codeck.wangj.de/api/device/v1/snapshot`，请求携带 `Accept: application/json` 和设备 Bearer 凭据，不调用管理接口、不触发刷新或写操作，也不跟随重定向。后台任务执行网络请求，主任务负责绘图，按键、温湿度和时间页面继续工作。
+
+**凭据配置**：将设备访问凭据原文保存到根目录 `codeck.key`，不用添加 `Bearer`、引号或 JSON；支持 UTF-8 BOM 和末尾换行。此文件已加入 Git 忽略，与 HA 的 `rc.key` 独立。CMake 构建时将其嵌入固件，首次创建或删除文件后执行 `idf.py reconfigure`，更换凭据后重新构建和烧录。缺失或无效文件时页面显示 `NO DEVICE KEY`，不发送请求。日志只记录固定状态码，HTTP 客户端的头部调试日志被抑制。**构建产物含凭据，应私有保存；当前不是加密 NVS 或在线凭据配置方案。**
+
+**TLS 与轮询**：等待 SNTP 成功校时之后才发起 HTTPS，使用 ESP-IDF `esp_crt_bundle_attach` 与完整 Mozilla 根证书 bundle，验证证书链、主机名和有效期，不固定叶证书、不关闭验证。成功后每 45 秒拉取一次；普通错误依次退避约 10、20、40、80、160、300 秒，再加 0–10% 随机抖动；401 最快 15 分钟重试一次。HTTP 503、403、TLS 错误、断网、解析错误、容量错误和未知 schema 版本分别显示独立状态。
+
+连接使用域名解析得到的 IPv4 地址，仍以原域名进行 SNI 和主机名校验，不固定服务器 IP。单次网络操作超时为 `BOARD_CODECK_TIMEOUT_MS`（20 秒）。页面分别显示 `DNS ERROR`、`CONNECTION TIMEOUT` 和 `TLS CONNECTION ERROR`。串口诊断仅记录请求阶段、耗时和数字错误码，不记录请求头或凭据。`Failed to open new connection in specified timeout` 表示尚未收到 HTTP 响应；旧日志中的 `status 7` 是内部网络错误状态，不是 HTTP 状态码。电脑端请求成功不能证明设备网络路径可达；如烧录后仍失败，可通过新的 `Snapshot transport` 日志区分失败阶段。
+
+证书 bundle 需开启 `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y`，配置已写入 `sdkconfig.defaults` 并同步当前 `sdkconfig`。本地 SDK 默认关闭此项；服务器在 2026-10-06 返回的链包含 WE1 → GTS Root R4 → GlobalSign 的交叉签名证书，旧模式可能沿链寻找 bundle 中已无的 GlobalSign 旧根而失败。开启后可选择 bundle 中受信任的 GTS Root R4 验证链，不添加叶证书、不关闭验证。已有项目只改 defaults 不会覆盖当前 sdkconfig，重新配置后应确认 `build/config/sdkconfig.h` 中该项为 1。可用 `python tests/probe_codeck.py --ca-file D:/esp/v6.1/esp-idf/components/mbedtls/esp_crt_bundle/cacrt_all.pem` 验证接口在 SDK 根证书集合下可达；此主机检查不代替板上握手验收。
+
+**页面与数据**：入口仍为环境 → Codeck → 网络 → 系统，KEY 短按切换主页面，长按 3 秒配网。Codeck 子页每 12 秒轮播，第一屏显示服务、Codex CLI、调度器、任务计数和两个额度窗口；随后每个余额配置独立分页，每页最多两种币种，更多币种顺延并重复配置名称。显示实际子页码，保留官方平台图标、圆角卡片和剩余额度条。设备现在显示真实数据，旧的固定演示只用于开发预览。
+
+- 严格解析 schema 1，使用最新字段 `service.codex_cli_available` 和 `balances.items[].name`；未知整数版本显示 `UNSUPPORTED API VERSION`，不猜字段。
+- 金额保留原始十进制字符串，绘图时按十进制运算四舍五入到两位小数，不经浮点数覆盖原值。每个配置、每个币种独立显示，不相加、不换算。
+- 额度不可用、空窗口、无余额观测、空金额均显示 `--`；成功响应中的其他可用分区继续显示。`stale=true` 显示 `OLD DATA` 并保留观测时间。
+- 请求失败保留 RAM 中最后成功快照，显示具体错误、`LAST KNOWN` / `CACHED` 和最后快照生成时间；任务计数标为 `LAST`。首次尚无成功数据或重启后没有缓存时显示占位符。
+- 时间统一显示 UTC，并区分快照生成时间、额度观测时间、账户观测时间和窗口重置时间。配置名支持常用中文，过长名称用省略号显示，模型保留原文；其他未覆盖字符显示方框。
+- 初始响应容量为 4 KiB（另加一个终止字节），完整接收后才解析，不静默截断。模型最多保存 8 条配置、每条 4 个币种；金额字符串最多 63 字节，名称最多 127 UTF-8 字节，平台最多 31 字节，币种代码最多 7 字节。超出模型或响应容量时整次更新失败并保留上次快照，不丢弃部分配置。
+
+主要文件：`main/codeck_client.c/.h`（凭据、HTTPS、后台轮询）、`main/codeck_state.c/.h`（契约解析、精确金额格式化、失败状态和退避）、`main/codeck_page.c/.h`（真实分页绘图）、`main/codeck_label.c/.h` 与 `assets/fonts/`（中文配置名点阵）；`main/ui.c`、`main/main.c`、`main/clock_service.c/.h`、`main/board_config.h`、`main/CMakeLists.txt` 和 `sdkconfig.defaults` 完成入口、线程安全校时门控、URL、凭据嵌入和证书配置。
+
+官方图标库为 `main/brand_icons.c/.h` / `brand_icons_data.h`，包含 24、32、48 px 三种大小，共 1,464 字节；[图标图库](docs/brand-icons/index.html) 提供原始资源与来源。配置名字体为 GNU Unifont 的 16 px 点阵子集，约 900 KiB，只驻留 Flash，不在设备上加载为同等大小的 RAM 图片，许可证随资源保留。
+
+[真实页面代码的样例与错误状态预览](docs/codeck-live-preview/index.html) 使用生产解析器和绘图代码，可检查多币种分页、中文名称、旧余额、未知额度、无观测、认证错误、503、TLS 错误、离线和未知版本。旧版 [布局演示](docs/codeck-preview/index.html) 仍可参考，但不再是设备实际数据路径。
+
+#### 页面截图与状态说明
+
+以下截图按实际 **400 × 300 单色画布**生成，使用生产解析器、页面绘图代码、点阵字体和官方来源图标。它们是代码渲染截图，并非实机拍摄；屏幕对比度、SNTP、板上 HTTPS 和断网恢复仍需烧录后确认。
+
+**真实接口快照**：下面三页来自接口在 **2026-10-06 06:20 UTC（北京时间 14:20）**生成的快照，图片中的数值固定在该次采集时刻，不会随 README 自动刷新。
+
+| 服务与 Codex 额度（第 1 页） | DeepSeek 余额（第 2 页） |
+| --- | --- |
+| ![真实快照：服务、Codex CLI、调度器和两个额度窗口](docs/images/codeck/live-overview.png) | ![真实快照：DeepSeek 配置 137，CNY 69.44](docs/images/codeck/live-deepseek.png) |
+
+![真实快照：OpenRouter 配置 qq，USD 9.97，第 3 页](docs/images/codeck/live-openrouter.png)
+
+- 顶部显示请求状态；首屏列出服务、CLI、调度器和运行任务数。额度属于 **Codex**，大数字 `LEFT` 是剩余比例，`USED` 是已用比例，`RESET` 是窗口重置时间。
+- 余额页分别显示平台图标、配置名称、币种和两位小数金额。DeepSeek 与 OpenRouter 各自成页，不合计账户或币种。
+- `OBS` / `UPDATED` 是数据成功观测时间，底部 `SNAPSHOT` 是快照生成时间；均为 UTC。余额观测时间可以早于快照时间。
+- Codeck 子页每 12 秒轮播，右下角显示当前子页和总数；KEY 短按切换到其他主页面。
+
+**多币种与旧数据样例**：以下及故障截图使用契约测试数据，2030 年时间用于验证显示，不代表真实接口观测。
+
+| 同一配置的多币种 | 余额已过期 |
+| --- | --- |
+| ![样例：工作账户分别显示 CNY 123.45 和 USD 2.10](docs/codeck-live-preview/0-1.png) | ![样例：OpenRouter 保留 USD 9.97，并标记 OLD DATA 和观测时间](docs/codeck-live-preview/0-3.png) |
+
+每页最多显示两种币种，第三种币种会[顺延到下一页](docs/codeck-live-preview/0-2.png)，并重复配置名称。`OLD DATA` 表示接口将该余额标为 `stale=true`，保留金额和更新时间。
+
+**缺失数据与故障状态**：故障通过客户端测试模拟，图中保留的是之前成功获取的样例快照。
+
+| 额度不可用 | 尚无余额观测 |
+| --- | --- |
+| ![额度不可用时两个窗口显示占位符](docs/codeck-live-preview/5-0.png) | ![没有成功观测时金额和更新时间显示占位符及 NO DATA](docs/codeck-live-preview/6-1.png) |
+
+| 401：凭据错误 | 503：服务暂不可用 |
+| --- | --- |
+| ![认证错误，标记 AUTH ERROR 和 LAST KNOWN，保留历史余额](docs/codeck-live-preview/1-1.png) | ![服务暂不可用，保留上次快照](docs/codeck-live-preview/2-1.png) |
+
+| TLS 校验失败 | 网络离线 |
+| --- | --- |
+| ![TLS 失败，标记错误并保留缓存余额](docs/codeck-live-preview/3-1.png) | ![断网时标记 OFFLINE 并保留缓存余额](docs/codeck-live-preview/4-1.png) |
+
+额度缺失和无余额观测均显示 `--`，不显示为 0。请求失败时，`LAST KNOWN` / `CACHED` 表示设备正在显示最后成功快照，底部保留其生成时间；这与单个余额的 `OLD DATA` 状态分别呈现。首次请求失败且没有缓存时只有占位符，不产生示例余额。
+
+```powershell
+# 公网 DNS / 证书链 / 主机名 / 实际 GET，以及一次无效凭据 GET；不输出 key。
+python tests/probe_codeck.py --check-auth
+# 生产解析器和模拟传输故障的客户端测试。
+python tests/test_codeck.py --zig <zig.exe路径>
+# 从真实绘图代码生成契约样例预览，检查文字、图形重叠和边界。
+python tests/preview_codeck_snapshot.py --zig <zig.exe路径>
+# 使用抓取的真实响应绘图；此预览保存到被忽略的 build/ 内。
+python tests/preview_codeck_snapshot.py --zig <zig.exe路径> --json build/codeck-live.json
+```
+
+本次主机验收：公网 DNS、TLS 1.3 证书链与主机名校验成功；有效凭据 GET 返回 200，最新响应 698 字节，生产解析器读出两个额度窗口和两条有观测的余额配置（DeepSeek / CNY、OpenRouter / USD）；无效凭据 GET 返回 401。多账户多币种由契约样例验证。69 个解析、金额、缓存和退避用例通过；实际 HTTP 客户端通过模拟成功、401、503、TLS 失败、断网、响应截断、超容量及 403，验证最后快照保留，含恰好 4 KiB 的合法响应边界。真实样例和所有故障页面通过绘图边界检查。凭据文件被忽略且未被跟踪，Git 可见文件凭据扫描通过。ESP-IDF 6.1 编译通过；**尚未烧录，板上 SNTP、HTTPS 和断网恢复需上板确认。**
 
 ### Wi-Fi 配网
 

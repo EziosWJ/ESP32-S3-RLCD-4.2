@@ -34,7 +34,15 @@
 #define BOARD_WIFI_RETRY_INTERVAL_MS 5000U
 #define BOARD_WIFI_PORTAL_GRACE_MS 10000U
 
+// POSIX time zone: CST-8 means UTC+8 (Beijing time), without DST.
+#define BOARD_TIMEZONE "CST-8"
+#define BOARD_NTP_SERVER "ntp.aliyun.com"
+
 #define BOARD_HA_URL "http://192.168.31.41:8123"
 #define BOARD_HA_POLL_INTERVAL_MS 15000U
 #define BOARD_HA_TIMEOUT_MS 4000U
 #define BOARD_HA_STALE_MS 45000U
+
+// Only the read-only device snapshot route is used by the Codeck client.
+#define BOARD_CODECK_SNAPSHOT_URL "https://codeck.wangj.de/api/device/v1/snapshot"
+#define BOARD_CODECK_TIMEOUT_MS 20000

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "codex-terminal",
+    "title": "Codex 官方终端 UI 图标",
+    "url": "https://developers.openai.com/images/codex/icons/terminal.svg",
+    "file": "codex-terminal.svg",
+    "sha256": "8c1354ef00c92260f3d698c43236d2a33f16fe09312d55a925184fd06d378e1a",
+    "retrieved_on": "2026-10-06"
+  },
+  {
+    "name": "deepseek",
+    "title": "DeepSeek 官方鲸鱼",
+    "url": "https://raw.githubusercontent.com/deepseek-ai/DeepSeek-LLM/main/images/logo.svg",
+    "file": "deepseek-original.svg",
+    "sha256": "ac13bdc805820c46bf0faf053aa5d31f72b051794abfe1dd72a682f09de2966b",
+    "retrieved_on": "2026-10-06"
+  },
+  {
+    "name": "openrouter",
+    "title": "OpenRouter 官方 Glyph · Ink",
+    "url": "https://openrouter.ai/brand/logos/transparent/glyph/svg/glyph-ink.svg",
+    "file": "openrouter.svg",
+    "sha256": "91be6b8a91745f089bfe42b89a5cbcd4b666fca6473610f9a6c11a31bd7523bc",
+    "retrieved_on": "2026-10-06"
+  }
+]

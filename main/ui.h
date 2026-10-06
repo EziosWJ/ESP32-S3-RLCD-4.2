@@ -7,6 +7,7 @@
 
 typedef enum {
     PAGE_SENSOR,
+    PAGE_CODECK,
     PAGE_NETWORK,
     PAGE_SYSTEM,
     PAGE_COUNT,

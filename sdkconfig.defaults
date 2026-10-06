@@ -20,3 +20,8 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # The setup API accepts a flat credentials object; bound the HTTP parser stack.
 CONFIG_CJSON_NESTING_LIMIT=8
+
+# HTTPS: trusted Mozilla roots, chain / hostname / time verification enabled.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y
