@@ -262,6 +262,17 @@ void rlcd_hline(int x, int y, int width)
     }
 }
 
+void rlcd_rect(int x, int y, int width, int height)
+{
+    if (width <= 0 || height <= 0) return;
+    rlcd_hline(x, y, width);
+    rlcd_hline(x, y + height - 1, width);
+    for (int row = 1; row < height - 1; ++row) {
+        black_pixel(x, y + row);
+        black_pixel(x + width - 1, y + row);
+    }
+}
+
 esp_err_t rlcd_flush(void)
 {
     if (panel == NULL || framebuffer == NULL) {

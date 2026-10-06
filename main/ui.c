@@ -56,6 +56,19 @@ void ui_update_measurement(bool valid, float temperature, float humidity, const 
 
 esp_err_t ui_render(void)
 {
+    ha_snapshot_t ha;
+    home_assistant_get_snapshot(&ha);
+    for (unsigned i = 0; i < HA_DEVICE_COUNT; ++i) {
+        const ha_device_t *old = &model.ha.devices[i];
+        const ha_device_t *next = &ha.devices[i];
+        if (old->temperature.status != next->temperature.status ||
+            old->humidity.status != next->humidity.status ||
+            old->temperature.value != next->temperature.value ||
+            old->humidity.value != next->humidity.value) {
+            if (current_page == PAGE_SENSOR && !setup_visible) dirty = true;
+        }
+    }
+    model.ha = ha;
     if (model.wifi_available) {
         wifi_setup_status_t wifi;
         wifi_setup_get_status(&wifi);

@@ -27,27 +27,49 @@ static const char *network_state(const ui_model_t *m)
     }
 }
 
+static const char *ha_status(ha_value_status_t status)
+{
+    switch (status) {
+    case HA_LIVE: return "LIVE";
+    case HA_OFFLINE: return "OFFLINE";
+    case HA_AUTH_ERROR: return "AUTH ERROR";
+    case HA_NOT_FOUND: return "NOT FOUND";
+    case HA_READ_ERROR: return "READ ERROR";
+    case HA_NO_TOKEN: return "NO TOKEN";
+    case HA_STALE: return "STALE";
+    default: return "READING";
+    }
+}
+
+static void sensor_card(int y, const char *name, const char *status,
+                        bool temp_valid, float temp, bool rh_valid, float rh)
+{
+    char text[24];
+    rlcd_rect(20, y, 360, 62);
+    rlcd_text(30, y + 7, name, 2);
+    rlcd_text(276, y + 10, status, 1);
+    if (temp_valid) snprintf(text, sizeof(text), "%.1f C", (double)temp);
+    else snprintf(text, sizeof(text), "--.- C");
+    rlcd_text(30, y + 30, text, 3);
+    if (rh_valid) snprintf(text, sizeof(text), "%.1f %%", (double)rh);
+    else snprintf(text, sizeof(text), "--.- %%");
+    rlcd_text(222, y + 30, text, 3);
+}
+
 void draw_sensor_page(const ui_model_t *m)
 {
-    char text[32];
-    header("TEMPERATURE AND RH");
-    rlcd_text(20, 72, "TEMPERATURE", 2);
-    if (m->valid) {
-        snprintf(text, sizeof(text), "%5.1f C", (double)m->temperature);
-    } else {
-        snprintf(text, sizeof(text), " --.- C");
+    static const char *names[HA_DEVICE_COUNT] = {"LIVING ROOM", "STUDY"};
+    header("HOME ENVIRONMENT");
+    sensor_card(60, "LOCAL SHTC3", m->valid ? "LIVE" : "READ ERROR",
+                m->valid, m->temperature, m->valid, m->humidity);
+    for (unsigned i = 0; i < HA_DEVICE_COUNT; ++i) {
+        const ha_device_t *d = &m->ha.devices[i];
+        const ha_value_status_t status = d->temperature.status != HA_LIVE ?
+                                          d->temperature.status : d->humidity.status;
+        sensor_card(128 + (int)i * 68, names[i], ha_status(status),
+                    d->temperature.status == HA_LIVE, d->temperature.value,
+                    d->humidity.status == HA_LIVE, d->humidity.value);
     }
-    rlcd_text(20, 96, text, 6);
-    rlcd_text(20, 156, "HUMIDITY", 2);
-    if (m->valid) {
-        snprintf(text, sizeof(text), "%5.1f %%", (double)m->humidity);
-    } else {
-        snprintf(text, sizeof(text), " --.- %%");
-    }
-    rlcd_text(20, 180, text, 6);
-    rlcd_text(20, 234, m->status, 1);
-    snprintf(text, sizeof(text), "WIFI %s", network_state(m));
-    rlcd_text(20, 250, text, 1);
 }
 
 void draw_network_page(const ui_model_t *m)

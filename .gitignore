@@ -4,6 +4,7 @@
 /sdkconfig
 /sdkconfig.old
 /sdkconfig.old.*
+/rc.key
 
 # Editor and operating system temporary files.
 *.swp

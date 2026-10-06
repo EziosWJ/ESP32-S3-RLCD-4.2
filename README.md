@@ -6,7 +6,31 @@
 
 工程已接入 **SHTC3 温湿度读取和 RLCD 显示**。上电后通过 USB Serial/JTAG 输出 SDK、芯片和内存信息，然后每 **2 秒**采样一次，在 **400 × 300 横屏**上显示温度（°C）和相对湿度（%RH），保留一位小数。
 
-屏幕使用内置黑白点阵字体，显示英文标签 `TEMPERATURE` 和 `HUMIDITY`；无需 LVGL / U8g2。读取失败或 CRC 校验失败时，数值变为 `--.-`，显示 `SENSOR ERROR - RETRYING`，之后继续采样，不把旧值作为当前数据展示。已接入 **Wi-Fi 热点网页配网、NVS 保存、自动重连和 KEY 长按重新配网**；音频、SD 卡、BLE 和 RTC 尚未接入。
+屏幕使用内置黑白点阵字体；无需 LVGL / U8g2。温湿度首页显示 **本机 SHTC3、客厅空调、书房空调三张独立卡片**。读取失败或 CRC 校验失败时，本机数值变为 `--.-`，之后继续采样。已接入 **Home Assistant 温湿度读取、Wi-Fi 热点网页配网、NVS 保存、自动重连和 KEY 长按重新配网**；音频、SD 卡、BLE 和 RTC 尚未接入。
+
+### Home Assistant 温湿度卡片
+
+三张卡片从上到下为 `LOCAL SHTC3`（本机）、`LIVING ROOM`（客厅）和 `STUDY`（书房），左侧温度，右侧相对湿度。内置字体暂不支持中文和度数符号，因此屏幕使用 `C` 表示摄氏度。网络和系统页面仍通过 KEY 短按切换。
+
+| 卡片 | 温度实体 | 湿度实体 |
+| --- | --- | --- |
+| 客厅 | `sensor.xiaomi_c24_08dc_temperature` | `sensor.xiaomi_c24_08dc_relative_humidity` |
+| 书房 | `sensor.xiaomi_h39h00_47aa_temperature` | `sensor.xiaomi_h39h00_47aa_relative_humidity` |
+
+- HA 地址在 `main/board_config.h` 的 `BOARD_HA_URL`，默认 `http://192.168.31.41:8123`。ESP32 应连接到可访问该地址的家庭局域网。
+- 将长期访问令牌单独放在项目根目录 `rc.key`，无需添加 `Bearer` 或引号；支持末尾换行及 UTF-8 BOM。构建时嵌入固件，所有请求添加 `Authorization: Bearer <token>`，协议依据 [HA REST API 文档](https://developers.home-assistant.io/docs/api/rest/)。令牌不输出到日志，`rc.key` 已被 Git 忽略；构建产物包含令牌，应作为私有文件保存。修改令牌后须重新构建并烧录；首次添加或删除文件时先运行 `idf.py reconfigure`。
+- 没有 `rc.key` 也可编译，此时 HA 卡片显示 `NO TOKEN`，本机传感器正常工作。
+- 独立后台任务逐个 GET 四个实体，完成一轮后等待 **15 秒**，单次 HTTP 操作超时 **4 秒**，响应限制为 4095 字节；不读取整个实体列表，不执行空调控制。轮询间隔、超时和过期时间均在 `main/board_config.h`。
+- 温度和湿度各自判断有效性。`unknown`、`unavailable` 或无效数值显示 `--.-` / `OFFLINE`；401/403 显示 `AUTH ERROR`，404 显示 `NOT FOUND`，网络或响应读取异常显示 `READ ERROR`。断网立即隐藏 HA 当前值，超过 **45 秒**未成功读取的数据显示 `STALE`。温度或湿度单独失败不隐藏另一项有效读数。连接恢复后自动读取。
+- UI 只读取任务快照，所有屏幕绘制仍在主任务中；本机 SHTC3 保持每 2 秒采样，按键轮询保持 20 ms。
+
+解析器回归测试编译实际 `main/ha_state.c` 与项目的 cJSON，覆盖正常值、独立湿度范围、非数值、离线状态、溢出、实体不匹配、截断和多余 JSON：
+
+```powershell
+python tests/test_ha_state.py --zig <zig.exe路径>
+```
+
+上板验收：确认三张卡片显示 → 断开 Wi-Fi 后本机继续刷新且 HA 值隐藏 → 重连后 HA 恢复 → 检查 KEY 切页及配网。令牌失效时更换 `rc.key` 后重新构建烧录。
 
 ### 页面切换
 
@@ -160,6 +184,8 @@ RLCD/
 │   ├── shtc3.c / .h       # ESP-IDF I²C 温湿度驱动和 CRC 校验
 │   ├── rlcd.c / .h        # RLCD 初始化、像素排列、字体和同步 SPI 刷新
 │   ├── wifi_setup.c / .h  # 网络任务、HTTP 门户、NVS、KEY 与自动重连
+│   ├── home_assistant.c/.h # HA 后台读取、令牌处理与温湿度快照
+│   ├── ha_state.c / .h    # HA JSON 实体及数值校验
 │   ├── portal_codec.c/.h  # 输入校验与有边界检查的 DNS 报文处理
 │   ├── wifi_portal.html   # 内嵌中文配网页面
 │   └── idf_component.yml  # ESP-IDF 6.1 的 cJSON 依赖
@@ -229,6 +255,7 @@ node tests/test_wifi_portal.js
 ## 验证记录
 
 - 初始化日期：2026-10-05。
+- Home Assistant 版本（2026-10-06）：ESP-IDF 6.1.0 构建通过，应用固件为 1,026,576 字节，4 MB 分区剩余 76%；40 个主机解析用例通过。四个真实实体均返回 HTTP 200，原始响应通过生产解析器校验；实际 UI 绘制代码的正常值、部分失败及数值边界预览已检查。尚未烧录，ESP32 上的读取、断网恢复及实际屏幕效果待上板验证。
 - 编译验证：使用本机 ESP-IDF 6.1.0 配置和 Xtensa GCC 15.2.0，通过 `idf.py reconfigure build size`；已核对生成配置中的 12 项板级参数。
 - 温湿度显示版本：通过 ESP-IDF 6.1.0 `idf.py build`，构建日志无编译警告或错误；应用固件为 226,736 字节。
 - Wi-Fi 配网版本：通过 ESP-IDF 6.1.0 构建和分区容量检查；8 位数字密码及双栈 HTTP 地址兼容版本应用固件为 917,136 字节，4 MB 应用分区剩余约 78%，无源码编译警告或错误。

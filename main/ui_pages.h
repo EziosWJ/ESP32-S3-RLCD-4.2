@@ -2,6 +2,7 @@
 
 #include "ui.h"
 #include "wifi_setup.h"
+#include "home_assistant.h"
 
 typedef struct {
     bool valid;
@@ -10,6 +11,7 @@ typedef struct {
     const char *status;
     bool wifi_available;
     wifi_setup_status_t wifi;
+    ha_snapshot_t ha;
     ui_system_info_t system;
 } ui_model_t;
 
