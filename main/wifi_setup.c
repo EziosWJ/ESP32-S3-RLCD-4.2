@@ -6,7 +6,6 @@
 #include <string.h>
 
 #include "cJSON.h"
-#include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
@@ -42,7 +41,7 @@ typedef struct {
     char password[65];
 } credentials_t;
 
-typedef enum { COMMAND_CONNECT, COMMAND_SCAN } command_type_t;
+typedef enum { COMMAND_CONNECT, COMMAND_SCAN, COMMAND_ENTER_PORTAL } command_type_t;
 typedef struct {
     command_type_t type;
     credentials_t credentials;
@@ -609,6 +608,15 @@ static void got_ip(void)
     ESP_LOGI(TAG, "Wi-Fi connected, IP: " IPSTR, IP2STR(&info.ip));
 }
 
+esp_err_t wifi_setup_start_portal(void)
+{
+    if (commands == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const command_t cmd = {.type = COMMAND_ENTER_PORTAL};
+    return xQueueSend(commands, &cmd, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
 static void network_task(void *arg)
 {
     if (have_saved) {
@@ -616,15 +624,15 @@ static void network_task(void *arg)
     } else {
         enter_portal();
     }
-    int64_t pressed_at = 0;
-    bool key_handled = false;
     while (true) {
         command_t cmd;
         if (xQueueReceive(commands, &cmd, pdMS_TO_TICKS(50)) == pdTRUE) {
             if (cmd.type == COMMAND_CONNECT) {
                 begin_connection(&cmd.credentials, true);
-            } else {
+            } else if (cmd.type == COMMAND_SCAN) {
                 start_scan();
+            } else if (cmd.type == COMMAND_ENTER_PORTAL) {
+                enter_portal();
             }
             memset(&cmd, 0, sizeof(cmd));
         }
@@ -655,18 +663,6 @@ static void network_task(void *arg)
             }
         }
         const int64_t now = now_ms();
-        if (gpio_get_level(BOARD_KEY_GPIO) == 0) {
-            if (pressed_at == 0) {
-                pressed_at = now;
-            }
-            if (!key_handled && now - pressed_at >= BOARD_WIFI_SETUP_HOLD_MS) {
-                key_handled = true;
-                enter_portal();
-            }
-        } else {
-            pressed_at = 0;
-            key_handled = false;
-        }
         if (connecting && now >= connect_deadline) {
             connection_failed(true);
         }
@@ -751,12 +747,6 @@ esp_err_t wifi_setup_init(void)
     for (unsigned i = 0; i < sizeof(token); ++i) {
         snprintf(setup_token + i * 2, 3, "%02X", token[i]);
     }
-    const gpio_config_t key = {
-        .pin_bit_mask = 1ULL << BOARD_KEY_GPIO, .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    ESP_RETURN_ON_ERROR(gpio_config(&key), TAG, "KEY init");
     ESP_RETURN_ON_FALSE(xTaskCreate(dns_task, "portal_dns", 3072, NULL, 3, NULL) == pdPASS,
                         ESP_ERR_NO_MEM, TAG, "DNS task");
     ESP_RETURN_ON_FALSE(xTaskCreate(network_task, "wifi_setup", 6144, NULL, 4, NULL) == pdPASS,

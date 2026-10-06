@@ -24,3 +24,5 @@ typedef struct {
 // Starts the network worker; drawing remains exclusively in app_main.
 esp_err_t wifi_setup_init(void);
 void wifi_setup_get_status(wifi_setup_status_t *status);
+// Queues a request; the network worker owns all portal lifecycle operations.
+esp_err_t wifi_setup_start_portal(void);
