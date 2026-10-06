@@ -1,4 +1,4 @@
-"""Render the actual Codeck C drawing code with the device's bitmap font."""
+"""Render the historical, pre-unified Codeck demo (not current firmware)."""
 import argparse
 import base64
 import json
@@ -120,7 +120,8 @@ button{cursor:pointer}button[aria-pressed=true]{background:#233a2b;color:white}
 img{width:400px;max-width:100%;height:auto;image-rendering:pixelated;box-shadow:0 4px 20px #0002;border:10px solid #333c33;border-radius:6px;box-sizing:border-box}
 figcaption{margin:12px 0 24px;color:#51594f}.note{border-top:1px solid #cbd0c8;padding-top:16px}
 </style><main><h1>Codeck · 设备状态</h1>
-<p>400 × 300 黑白横屏 · 使用项目实际 C 绘图代码与 5 × 7 点阵字体生成。<br>
+<p>历史布局演示，不代表当前固件。请查看 <a href="../ui-preview/index.html">统一 UI 生产预览</a>。<br>
+400 × 300 黑白横屏 · 使用旧演示代码与 5 × 7 点阵字体生成。<br>
 这是固定示例数据；时间统一标为 UTC，快照生成于 2026-10-06 08:30。</p>
 <nav aria-label="示例状态" id="states"></nav>
 <div class="screens"><figure><img id="overview" alt="服务与额度页面"><figcaption>01 / 服务与额度</figcaption></figure>

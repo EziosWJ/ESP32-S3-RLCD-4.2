@@ -96,10 +96,7 @@ void app_main(void)
     TickType_t last_wake = xTaskGetTickCount();
     while (true) {
         const button_event_t event = button_poll();
-        if (event == BUTTON_SHORT_PRESS) {
-            ui_next_page();
-            ESP_LOGI(TAG, "KEY short press: next page");
-        } else if (event == BUTTON_LONG_PRESS && wifi_available) {
+        if (ui_handle_button(event) && wifi_available) {
             const esp_err_t err = wifi_setup_start_portal();
             if (err == ESP_OK) {
                 ui_show_setup();

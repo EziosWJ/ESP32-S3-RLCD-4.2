@@ -5,12 +5,12 @@
 #include <stddef.h>
 #include "esp_err.h"
 #include "battery.h"
+#include "button.h"
 
 typedef enum {
     PAGE_SENSOR,
     PAGE_CODECK,
     PAGE_NETWORK,
-    PAGE_SYSTEM,
     PAGE_COUNT,
 } ui_page_t;
 
@@ -24,6 +24,10 @@ typedef struct {
 void ui_init(bool wifi_available, const ui_system_info_t *system);
 void ui_set_page(ui_page_t page);
 void ui_next_page(void);
+void ui_scroll(void);
+bool ui_can_setup(void);
+// Applies navigation; true asks app_main to queue a Wi-Fi setup request.
+bool ui_handle_button(button_event_t event);
 void ui_show_setup(void);
 void ui_update_measurement(bool valid, float temperature, float humidity, const char *status);
 void ui_update_battery(const battery_reading_t *reading);

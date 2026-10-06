@@ -11,6 +11,14 @@ extern const uint8_t font[] asm("_binary_codeck_labels_start");
 
 void codeck_label_text(int x, int y, const char *utf8, int width)
 {
+    codeck_label_lines(x, y, utf8, width, 1);
+}
+
+void codeck_label_lines(int x, int y, const char *utf8, int width, unsigned lines)
+{
+    if (!lines || width < 24) return;
+    const int left=x;
+    unsigned line=0;
     const int limit=x+width;
     const unsigned char *p=(const unsigned char *)utf8;
     while(*p) {
@@ -24,9 +32,10 @@ void codeck_label_text(int x, int y, const char *utf8, int width)
             }
             cell=16;
         }
+        if(x+cell>limit && line+1<lines) { x=left; y+=16; ++line; }
         if(x+cell>limit) break;
         // Preserve the complete name in the model; long screen labels end ...
-        if(*p && x+cell+16>limit) { rlcd_text(x,y+5,"...",1); break; }
+        if(line+1==lines && *p && x+cell+18>limit) { rlcd_text(x,y+5,"...",1); break; }
         const uint8_t *glyph=NULL;
         if(cp<128) glyph=font+cp*32;
         else if(cp>=0x3000 && cp<0xa000) glyph=font+(128+cp-0x3000)*32;

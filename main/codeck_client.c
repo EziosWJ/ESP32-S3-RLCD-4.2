@@ -39,8 +39,9 @@ static bool load_key(void)
 #endif
 }
 
-static codeck_status_t fetch(char *body, codeck_snapshot_t *scratch)
+static codeck_status_t fetch(char *body, codeck_snapshot_t *scratch, bool *recoverable)
 {
+    *recoverable = false;
     const esp_http_client_config_t cfg = {
         .url = BOARD_CODECK_SNAPSHOT_URL,
         .method = HTTP_METHOD_GET,
@@ -77,7 +78,9 @@ static codeck_status_t fetch(char *body, codeck_snapshot_t *scratch)
     stage = "body";
     const int64_t deadline = esp_timer_get_time() + 20LL*1000*1000;
     while (!esp_http_client_is_complete_data_received(client)) {
-        if (esp_timer_get_time() > deadline) goto done;
+        if (esp_timer_get_time() > deadline) {
+            result=CODECK_CONNECT_TIMEOUT; *recoverable=true; goto done;
+        }
         char extra;
         const int read = esp_http_client_read(client, length < CODECK_BODY_LIMIT ? body+length : &extra,
                                               length < CODECK_BODY_LIMIT ? CODECK_BODY_LIMIT-length : 1);
@@ -99,6 +102,11 @@ transport_error: {
     else if (tls_result==ESP_ERR_ESP_TLS_CONNECTION_TIMEOUT) result=CODECK_CONNECT_TIMEOUT;
     else if (flags || tls_error < 0 || tls_result==ESP_ERR_MBEDTLS_SSL_HANDSHAKE_FAILED ||
              tls_result==ESP_ERR_ESP_TLS_SERVER_HANDSHAKE_TIMEOUT) result=CODECK_TLS_ERROR;
+    // Certificate errors require a valid trust chain/time, rather than a
+    // station reset. SDKs may report the mbedTLS detail with either sign.
+    const bool certificate_error = flags || tls_error==0x3000 || tls_error==-0x3000 ||
+                                   tls_error==0x2700 || tls_error==-0x2700;
+    *recoverable = !certificate_error;
     // Only fixed stage names and numeric SDK diagnostics; never headers/body/key.
     ESP_LOGW(TAG,"Snapshot transport: stage=%s elapsed_ms=%lld sdk=0x%x tls=0x%x detail=%d flags=0x%x",
              stage,(long long)((esp_timer_get_time()-started)/1000),
@@ -107,6 +115,49 @@ transport_error: {
 done:
     esp_http_client_cleanup(client);
     return result;
+}
+
+typedef struct {
+    int64_t next_poll_ms, reconnect_allowed_ms;
+    unsigned failures, transport_failures;
+    bool was_ready;
+    codeck_status_t last_result;
+} recovery_t;
+
+static bool poll_ready(recovery_t *r, codeck_status_t gate, int64_t now)
+{
+    if (gate!=CODECK_OK) { r->was_ready=false; return false; }
+    if (!r->was_ready) {
+        // Keep the authentication cooldown even when Wi-Fi is toggled.
+        if (r->last_result!=CODECK_AUTH_ERROR) {
+            r->next_poll_ms=now; r->failures=0; r->transport_failures=0;
+            ESP_LOGI(TAG,"Network/time ready; requesting snapshot");
+        }
+        r->was_ready=true;
+    }
+    return now>=r->next_poll_ms;
+}
+
+static void schedule_result(recovery_t *r, codeck_status_t result, bool recoverable,
+                            int64_t now, uint32_t random)
+{
+    r->last_result=result;
+    if (result==CODECK_OK) { r->failures=0; r->transport_failures=0; }
+    else {
+        if (r->failures<32) ++r->failures;
+        if (recoverable) { if (r->transport_failures<32) ++r->transport_failures; }
+        else r->transport_failures=0;
+    }
+    r->next_poll_ms=now + codeck_retry_delay(result,r->failures,random);
+    if (r->transport_failures>=BOARD_CODECK_RECONNECT_FAILURES && now>=r->reconnect_allowed_ms) {
+        wifi_setup_status_t wifi; wifi_setup_get_status(&wifi);
+        if (wifi.state==WIFI_SETUP_CONNECTED && !wifi.portal_active &&
+            wifi_setup_request_reconnect()==ESP_OK) {
+            r->transport_failures=0;
+            r->reconnect_allowed_ms=now+BOARD_CODECK_RECONNECT_COOLDOWN_MS;
+            ESP_LOGW(TAG,"Queued Wi-Fi recovery; cooldown_ms=%u",BOARD_CODECK_RECONNECT_COOLDOWN_MS);
+        }
+    }
 }
 
 static void worker(void *arg)
@@ -118,26 +169,45 @@ static void worker(void *arg)
         free(last); free(scratch); free(body);
         ESP_LOGE(TAG,"No memory for snapshot reader"); vTaskDelete(NULL); return;
     }
-    int64_t next_poll=0; unsigned failures=0;
+    recovery_t recovery={0};
     while (true) {
         wifi_setup_status_t wifi; wifi_setup_get_status(&wifi);
         codeck_status_t gate = wifi.state!=WIFI_SETUP_CONNECTED ? CODECK_WAIT_NETWORK :
                                !clock_service_is_synchronized() ? CODECK_WAIT_TIME : CODECK_OK;
+        const bool due=poll_ready(&recovery,gate,esp_timer_get_time()/1000);
         if (gate != CODECK_OK) {
+            last->retry_seconds=0;
             if (last->status != gate) { codeck_state_failure(last,gate); xQueueOverwrite(snapshots,last); }
-        } else if (esp_timer_get_time()/1000 >= next_poll) {
-            const codeck_status_t result=fetch(body,scratch);
+        } else if (due) {
+            last->fetching=true; last->retry_seconds=0; xQueueOverwrite(snapshots,last);
+            bool recoverable;
+            const codeck_status_t result=fetch(body,scratch,&recoverable);
+            const int64_t now=esp_timer_get_time()/1000;
+            const bool recovering=recovery.last_result!=CODECK_OK;
+            schedule_result(&recovery,result,recoverable,now,esp_random());
             if (result==CODECK_OK) {
-                scratch->received_ms=esp_timer_get_time()/1000;
+                scratch->received_ms=now;
                 scratch->revision=last->revision+1;
-                *last=*scratch; failures=0;
+                *last=*scratch;
+                if (recovering) ESP_LOGI(TAG,"Snapshot recovered");
             } else {
-                codeck_state_failure(last,result); if(failures<32) ++failures;
+                codeck_state_failure(last,result);
                 // Fixed status only: no response, key, headers or raw error text.
-                ESP_LOGW(TAG,"Snapshot unavailable (status %u)",(unsigned)result);
+                last->retry_seconds=(unsigned)((recovery.next_poll_ms-now+999)/1000);
+                ESP_LOGW(TAG,"Snapshot unavailable (status %u); failures=%u retry_in_s=%u",
+                         (unsigned)result,recovery.failures,last->retry_seconds);
             }
+            last->fetching=false;
             xQueueOverwrite(snapshots,last);
-            next_poll=esp_timer_get_time()/1000 + codeck_retry_delay(result,failures,esp_random());
+        } else if (last->status!=CODECK_OK) {
+            const bool restore_auth = recovery.last_result==CODECK_AUTH_ERROR &&
+                                      last->status!=CODECK_AUTH_ERROR;
+            if (restore_auth) codeck_state_failure(last,CODECK_AUTH_ERROR);
+            const int64_t remaining=recovery.next_poll_ms-esp_timer_get_time()/1000;
+            const unsigned seconds=remaining>0 ? (unsigned)((remaining+999)/1000) : 0;
+            if (restore_auth || seconds!=last->retry_seconds) {
+                last->retry_seconds=seconds; xQueueOverwrite(snapshots,last);
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(500));
     }

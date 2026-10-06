@@ -1,10 +1,10 @@
 [
   {
-    "name": "codex-terminal",
-    "title": "Codex 官方终端 UI 图标",
-    "url": "https://developers.openai.com/images/codex/icons/terminal.svg",
-    "file": "codex-terminal.svg",
-    "sha256": "8c1354ef00c92260f3d698c43236d2a33f16fe09312d55a925184fd06d378e1a",
+    "name": "openai",
+    "title": "OpenAI 官方 Blossom",
+    "url": "https://cdn.openai.com/brand/OpenAI-Logos-2025.zip",
+    "file": "openai.svg",
+    "sha256": "7be72f1fea831d3ba81a545cee79b7e0ae69449d5d7837c9571ccbfb4aa1e00b",
     "retrieved_on": "2026-10-06"
   },
   {

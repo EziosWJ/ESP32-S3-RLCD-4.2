@@ -18,6 +18,9 @@ typedef struct {
     char ap_ssid[20];
     char ap_password[9];
     char ip[16];
+    char station_ssid[33];
+    bool signal_valid;
+    int rssi;
     char message[128];
 } wifi_setup_status_t;
 
@@ -26,3 +29,6 @@ esp_err_t wifi_setup_init(void);
 void wifi_setup_get_status(wifi_setup_status_t *status);
 // Queues a request; the network worker owns all portal lifecycle operations.
 esp_err_t wifi_setup_start_portal(void);
+// Recover a stalled station connection through the network worker.
+// Ignored while the setup portal or another connection is active.
+esp_err_t wifi_setup_request_reconnect(void);

@@ -5,12 +5,8 @@
 #include "esp_system.h"
 #include "board_config.h"
 #include "rlcd.h"
-
-static void header(const char *title)
-{
-    rlcd_text(20, 18, title, 3);
-    rlcd_hline(20, 52, 360);
-}
+#include "ui_chrome.h"
+#include "codeck_label.h"
 
 static const char *network_state(const ui_model_t *m)
 {
@@ -45,7 +41,7 @@ static void sensor_card(int y, const char *name, const char *status,
                         bool temp_valid, float temp, bool rh_valid, float rh)
 {
     char text[24];
-    rlcd_rect(20, y, 360, 62);
+    ui_draw_card(20, y, 360, 62);
     rlcd_text(30, y + 7, name, 2);
     rlcd_text(276, y + 10, status, 1);
     if (temp_valid) snprintf(text, sizeof(text), "%.1f C", (double)temp);
@@ -59,11 +55,6 @@ static void sensor_card(int y, const char *name, const char *status,
 void draw_sensor_page(const ui_model_t *m)
 {
     static const char *names[HA_DEVICE_COUNT] = {"LIVING ROOM", "STUDY"};
-    rlcd_text(20, 8, "HOME ENVIRONMENT", 2);
-    rlcd_text(338, 11, m->clock.valid ? "BEIJING" : "NO TIME", 1);
-    rlcd_text(20, 32, m->clock.date, 2);
-    rlcd_text(236, 27, m->clock.time, 3);
-    rlcd_hline(20, 52, 360);
     sensor_card(60, "LOCAL SHTC3", m->valid ? "LIVE" : "READ ERROR",
                 m->valid, m->temperature, m->valid, m->humidity);
     for (unsigned i = 0; i < HA_DEVICE_COUNT; ++i) {
@@ -76,34 +67,46 @@ void draw_sensor_page(const ui_model_t *m)
     }
 }
 
-void draw_network_page(const ui_model_t *m)
-{
-    header("NETWORK STATUS");
-    rlcd_text(20, 74, "WIFI", 2);
-    rlcd_text(20, 100, network_state(m), 3);
-    rlcd_text(20, 142, "DEVICE IP", 2);
-    // IPv4 addresses use the font's supported digits and dots.
-    rlcd_text(20, 168, m->wifi.ip[0] ? m->wifi.ip : "--.--.--.--", 3);
-    rlcd_text(20, 212, m->wifi_available && m->wifi.portal_active ?
-              "SETUP HOTSPOT ACTIVE" : "SETUP HOTSPOT OFF", 2);
-    rlcd_text(20, 242, "HOLD KEY TO OPEN WIFI SETUP", 1);
-}
-
-void draw_system_page(const ui_model_t *m)
+void draw_network_page(const ui_model_t *m, unsigned screen)
 {
     char text[64];
-    header("SYSTEM INFO");
-    rlcd_text(20, 66, "ESP32-S3 RLCD 4.2", 2);
-    snprintf(text, sizeof(text), "CPU CORES %u", m->system.cores);
-    rlcd_text(20, 90, text, 2);
+    if (screen % 2 == 0) {
+        ui_draw_card(20, 64, 360, 140);
+        ui_draw_icon(UI_ICON_WIFI, 30, 76);
+        rlcd_text(52, 76, network_state(m), 2);
+        const bool connected = m->wifi_available && m->wifi.state == WIFI_SETUP_CONNECTED;
+        codeck_label_text(30, 102, connected && m->wifi.station_ssid[0] ? m->wifi.station_ssid : "NO CONNECTED NETWORK", 340);
+        rlcd_text(30, 128, "DEVICE IP", 1);
+        if (connected && m->wifi.signal_valid)
+            snprintf(text, sizeof(text), "SIGNAL %d DBM", m->wifi.rssi);
+        else snprintf(text, sizeof(text), "SIGNAL --");
+        rlcd_text(230, 128, text, 1);
+        rlcd_text(30, 151, connected && m->wifi.ip[0] ? m->wifi.ip : "--.--.--.--", 3);
+        rlcd_text(30, 186, "2.4 GHZ WIFI", 1);
+        ui_draw_card(20, 216, 360, 78);
+        ui_draw_icon(UI_ICON_SERVICE, 30, 229);
+        rlcd_text(52, 229, m->wifi_available && m->wifi.portal_active ? "HOTSPOT ACTIVE" : "HOTSPOT OFF", 2);
+        rlcd_text(30, 254, "HOLD KEY 3S TO SET UP WIFI", 2);
+        rlcd_text(30, 280, "BOOT NEXT CARD SCREEN", 1);
+        return;
+    }
+    ui_draw_card(20, 64, 360, 102);
+    ui_draw_icon(UI_ICON_CHIP, 30, 76);
+    rlcd_text(52, 76, "ESP32-S3 RLCD 4.2", 2);
+    snprintf(text, sizeof(text), "CORES %u", m->system.cores);
+    rlcd_text(30, 101, text, 2);
     snprintf(text, sizeof(text), "FLASH %u MB", (unsigned)(m->system.flash_bytes / (1024U * 1024U)));
-    rlcd_text(20, 114, text, 2);
+    rlcd_text(190, 101, text, 2);
     snprintf(text, sizeof(text), "PSRAM %u MB", (unsigned)(m->system.psram_bytes / (1024U * 1024U)));
-    rlcd_text(20, 138, text, 2);
-    snprintf(text, sizeof(text), "DISPLAY %u X %u", BOARD_RLCD_WIDTH, BOARD_RLCD_HEIGHT);
-    rlcd_text(20, 162, text, 2);
-    rlcd_text(20, 190, !m->battery.valid ? "BATTERY UNKNOWN" :
-              m->battery.detected ? "BATTERY DETECTED - EST" : "BATTERY NOT DETECTED - EST", 2);
+    rlcd_text(30, 125, text, 2);
+    snprintf(text, sizeof(text), "LCD %u X %u", BOARD_RLCD_WIDTH, BOARD_RLCD_HEIGHT);
+    rlcd_text(190, 125, text, 2);
+    snprintf(text, sizeof(text), "ESP-IDF %.44s", esp_get_idf_version());
+    for (char *p = text; *p; ++p) *p = (char)toupper((unsigned char)*p);
+    rlcd_text(30, 150, text, 1);
+    ui_draw_card(20, 176, 360, 72);
+    ui_draw_icon(UI_ICON_BATTERY, 30, 186);
+    rlcd_text(52, 186, "BATTERY / ESTIMATED", 2);
     if (m->battery.valid) {
         snprintf(text, sizeof(text), "%u.%03u V",
                  (unsigned)(m->battery.voltage_mv / 1000U),
@@ -111,24 +114,24 @@ void draw_system_page(const ui_model_t *m)
     } else {
         snprintf(text, sizeof(text), "--.--- V");
     }
-    rlcd_text(20, 214, text, 2);
+    rlcd_text(30, 213, text, 2);
     if (m->battery.valid && m->battery.detected) {
         snprintf(text, sizeof(text), "%u%% EST", m->battery.percent);
     } else {
         snprintf(text, sizeof(text), "--%% EST");
     }
-    rlcd_text(220, 214, text, 2);
-    snprintf(text, sizeof(text), "ESP-IDF %.44s", esp_get_idf_version());
-    for (char *p = text; *p != '\0'; ++p) {
-        *p = (char)toupper((unsigned char)*p);
-    }
-    rlcd_text(20, 238, text, 1);
+    rlcd_text(238, 213, text, 2);
+    rlcd_text(30, 237, !m->battery.valid ? "READING UNKNOWN" :
+              m->battery.detected ? "DETECTED BY VOLTAGE" : "NOT DETECTED BY VOLTAGE", 1);
+    ui_draw_card(20, 258, 360, 36);
+    ui_draw_icon(UI_ICON_CLOCK, 30, 268);
+    snprintf(text, sizeof(text), "%s  UTC+8", m->clock.valid ? m->clock.date : "---- -- --");
+    rlcd_text(52, 269, text, 2);
 }
 
 void draw_setup_page(const ui_model_t *m)
 {
     char text[40];
-    header("WIFI SETUP");
     rlcd_text(20, 68, "CONNECT PHONE TO", 2);
     rlcd_text(20, 92, m->wifi.ap_ssid, 3);
     rlcd_text(20, 124, "HOTSPOT PASSWORD", 2);
@@ -143,12 +146,5 @@ void draw_setup_page(const ui_model_t *m)
     } else {
         rlcd_text(20, 242, m->status, 1);
     }
-}
-
-void draw_page_footer(ui_page_t page, bool setup)
-{
-    static const char *labels[] = {"1 OF 4  SENSOR", "2 OF 4  CODECK", "3 OF 4  NETWORK", "4 OF 4  SYSTEM"};
-    rlcd_hline(20, 268, 360);
-    rlcd_text(20, 277, setup ? "SETUP  KEY TO BROWSE" : labels[page], 1);
-    rlcd_text(20, 290, "KEY NEXT  HOLD 3 SECONDS WIFI SETUP", 1);
+    rlcd_text(20, 280, "KEY TO BROWSE / HOTSPOT STAYS ON", 1);
 }

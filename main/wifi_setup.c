@@ -41,7 +41,7 @@ typedef struct {
     char password[65];
 } credentials_t;
 
-typedef enum { COMMAND_CONNECT, COMMAND_SCAN, COMMAND_ENTER_PORTAL } command_type_t;
+typedef enum { COMMAND_CONNECT, COMMAND_SCAN, COMMAND_ENTER_PORTAL, COMMAND_RECONNECT } command_type_t;
 typedef struct {
     command_type_t type;
     credentials_t credentials;
@@ -85,6 +85,8 @@ static void set_state(wifi_setup_state_t state, const char *message)
     strlcpy(status.message, message, sizeof(status.message));
     if (state != WIFI_SETUP_CONNECTED) {
         status.ip[0] = '\0';
+        status.station_ssid[0] = '\0';
+        status.signal_valid = false;
     }
     xSemaphoreGive(lock);
 }
@@ -601,6 +603,9 @@ static void got_ip(void)
     set_state(WIFI_SETUP_CONNECTED, "Connected! Settings saved. The hotspot will close in 10 seconds.");
     xSemaphoreTake(lock, portMAX_DELAY);
     snprintf(status.ip, sizeof(status.ip), IPSTR, IP2STR(&info.ip));
+    strlcpy(status.station_ssid, target.ssid, sizeof(status.station_ssid));
+    status.signal_valid = true;
+    status.rssi = ap.rssi;
     if (status.portal_active) {
         close_at = now_ms() + BOARD_WIFI_PORTAL_GRACE_MS;
     }
@@ -614,6 +619,13 @@ esp_err_t wifi_setup_start_portal(void)
         return ESP_ERR_INVALID_STATE;
     }
     const command_t cmd = {.type = COMMAND_ENTER_PORTAL};
+    return xQueueSend(commands, &cmd, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+esp_err_t wifi_setup_request_reconnect(void)
+{
+    if (commands == NULL) return ESP_ERR_INVALID_STATE;
+    const command_t cmd = {.type = COMMAND_RECONNECT};
     return xQueueSend(commands, &cmd, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
@@ -633,6 +645,14 @@ static void network_task(void *arg)
                 start_scan();
             } else if (cmd.type == COMMAND_ENTER_PORTAL) {
                 enter_portal();
+            } else if (cmd.type == COMMAND_RECONNECT) {
+                wifi_setup_status_t snapshot;
+                wifi_setup_get_status(&snapshot);
+                if (have_saved && !connecting && !testing && !snapshot.portal_active &&
+                    snapshot.state == WIFI_SETUP_CONNECTED) {
+                    ESP_LOGW(TAG, "Recovering station connection after transport failures");
+                    begin_connection(&saved, false);
+                }
             }
             memset(&cmd, 0, sizeof(cmd));
         }
@@ -663,6 +683,20 @@ static void network_task(void *arg)
             }
         }
         const int64_t now = now_ms();
+        static int64_t signal_at;
+        if (now >= signal_at) {
+            signal_at = now + 2000;
+            wifi_setup_status_t snapshot;
+            wifi_setup_get_status(&snapshot);
+            if (snapshot.state == WIFI_SETUP_CONNECTED) {
+                wifi_ap_record_t ap;
+                const bool valid = esp_wifi_sta_get_ap_info(&ap) == ESP_OK;
+                xSemaphoreTake(lock, portMAX_DELAY);
+                status.signal_valid = valid;
+                if (valid) status.rssi = ap.rssi;
+                xSemaphoreGive(lock);
+            }
+        }
         if (connecting && now >= connect_deadline) {
             connection_failed(true);
         }

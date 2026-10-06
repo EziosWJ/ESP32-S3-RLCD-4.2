@@ -2,7 +2,8 @@
 
 原始文件保留官方形状；品牌图形属于各自权利人。下载记录、来源 URL 和 SHA-256 见 [sources.json](sources.json)。
 
-- `codex-terminal.svg`：[Codex 官方页面的终端 UI 图标](https://developers.openai.com/images/codex/icons/terminal.svg)。这是官方 UI 图标，不是独立 Codex 品牌 Logo。
+- `openai.svg`：[OpenAI 官方品牌资源包](https://cdn.openai.com/brand/OpenAI-Logos-2025.zip)中的 `OpenAI-black-monoblossom.svg`，原始文件保持不变；Codex CLI 额度卡片使用这个 Blossom。
+- `codex-terminal.svg`：保留的旧终端 UI 资源，当前固件不使用；已有文件改动保留。
 - `deepseek-original.svg`：[DeepSeek 官方仓库横标](https://github.com/deepseek-ai/DeepSeek-LLM/blob/main/images/logo.svg)。生成器复制根节点下的鲸鱼路径到 `deepseek-symbol.svg`，不重绘路径。
 - `openrouter.svg`：[OpenRouter 官方品牌资源](https://openrouter.ai/brand)，使用 Glyph / Ink 版本。
 

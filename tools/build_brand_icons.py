@@ -32,8 +32,8 @@ def main():
     symbol.append(deepcopy(whale[0]))
     ET.ElementTree(symbol).write(assets / 'deepseek-symbol.svg', encoding='utf-8', xml_declaration=True)
     icons = [
-        ('codex-terminal', 'Codex 官方终端 UI 图标', 'https://developers.openai.com/images/codex/icons/terminal.svg',
-         'codex-terminal.svg', 'codex-terminal.svg'),
+        ('openai', 'OpenAI 官方 Blossom', 'https://cdn.openai.com/brand/OpenAI-Logos-2025.zip',
+         'openai.svg', 'openai.svg'),
         ('deepseek', 'DeepSeek 官方鲸鱼', 'https://raw.githubusercontent.com/deepseek-ai/DeepSeek-LLM/main/images/logo.svg',
          'deepseek-original.svg', 'deepseek-symbol.svg'),
         ('openrouter', 'OpenRouter 官方 Glyph · Ink', 'https://openrouter.ai/brand/logos/transparent/glyph/svg/glyph-ink.svg',
@@ -86,7 +86,7 @@ main{max-width:920px;margin:36px auto;padding:0 24px}p{line-height:1.8;color:#56
 h1{font-size:28px}h2{font-size:20px;margin:0}a{color:#285d3e}.variants{display:flex;align-items:flex-end;gap:40px;flex-wrap:wrap}figure{margin:20px 0 0;min-width:120px}figcaption{margin-top:12px;color:#566257;font-size:14px}.pixel{image-rendering:pixelated;display:block}
 </style><main><h1>官方图标 · 黑白屏图库</h1><p>官方 SVG 原文件保留在项目内，去除透明边缘后等比例缩放、居中留白，再按透明度转换为 1-bit 点阵。
 下方以 3 倍尺寸展示像素效果，页面使用 24 px 版本；另提供 32 / 48 px 版本，供后续布局使用。</p>
-<p>Codex 使用官方页面的终端 UI 图标，不将它标为独立品牌 Logo。DeepSeek 提取官方横标中的鲸鱼路径；OpenRouter 使用新版官方 Ink 图形。
+<p>Codex 使用 OpenAI 官方资源包的黑色 Blossom。DeepSeek 提取官方横标中的鲸鱼路径；OpenRouter 使用新版官方 Ink 图形。
 所有品牌图形属于各自权利人。<a href="../codeck-preview/index.html">查看 Codeck 页面效果</a></p>CARDS</main></html>'''
     (output / 'index.html').write_text(html.replace('CARDS', ''.join(cards)), encoding='utf-8')
     print('Generated 9 official-source 1-bit icons (1464 bytes total) and gallery.')

@@ -33,6 +33,8 @@ typedef struct {
     codeck_status_t status;
     int64_t received_ms;
     uint32_t revision;
+    unsigned retry_seconds;
+    bool fetching;
 } codeck_snapshot_t;
 
 // Parse into scratch; caller commits only CODECK_OK. No string truncation.

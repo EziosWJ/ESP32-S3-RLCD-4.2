@@ -20,7 +20,8 @@ class Snapshot(C.Structure):
     _fields_ = [('has_snapshot',C.c_bool),('service',C.c_bool),('cli',C.c_bool),('scheduler',C.c_bool),
                 ('tasks',C.c_uint),('generated',C.c_char*40),('quota_observed',C.c_char*40),
                 ('quota',C.c_bool),('balances',C.c_bool),('windows',Window*2),('count',C.c_uint),
-                ('accounts',Account*8),('status',C.c_int),('received',C.c_int64),('revision',C.c_uint32)]
+                ('accounts',Account*8),('status',C.c_int),('received',C.c_int64),('revision',C.c_uint32),
+                ('retry_seconds',C.c_uint),('fetching',C.c_bool)]
 
 FIXTURE = {
     'schema_version':1, 'generated_at':'2030-01-01T12:00:00Z',
@@ -113,8 +114,9 @@ def main():
         count+=1
     assert retry(0,20,123)==45000 and retry(4,20,123)==900000
     delays=[retry(7,n,0) for n in range(1,10)]
-    assert delays==[10000,20000,40000,80000,160000,300000,300000,300000,300000]
-    assert 300000<=retry(7,32,0xffffffff)<=330000; count+=3
+    assert delays==[10000,20000,40000,60000,60000,60000,60000,60000,60000]
+    for status in [7,8,12,13]: assert 60000<=retry(status,32,0xffffffff)<=66000
+    assert 300000<=retry(5,32,0xffffffff)<=330000; count+=3
     live=ROOT/'build/codeck-live.json'
     if live.exists():
         real=check(live.read_bytes()); print('Live HTTPS response parsed:',real.count,'accounts;',sum(w.valid for w in real.windows),'valid windows')

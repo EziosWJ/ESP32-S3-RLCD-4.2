@@ -36,6 +36,8 @@
 
 // KEY: active-low GPIO 18, verified against the local factory button_bsp.c.
 #define BOARD_KEY_GPIO 18
+// Factory button_bsp.c: BOOT is active-low GPIO0 (also the boot strap).
+#define BOARD_BOOT_GPIO 0
 #define BOARD_KEY_DEBOUNCE_MS 40U
 #define BOARD_UI_POLL_INTERVAL_MS 20U
 #define BOARD_WIFI_SETUP_HOLD_MS 3000U
@@ -55,3 +57,5 @@
 // Only the read-only device snapshot route is used by the Codeck client.
 #define BOARD_CODECK_SNAPSHOT_URL "https://codeck.wangj.de/api/device/v1/snapshot"
 #define BOARD_CODECK_TIMEOUT_MS 20000
+#define BOARD_CODECK_RECONNECT_FAILURES 3U
+#define BOARD_CODECK_RECONNECT_COOLDOWN_MS 300000U

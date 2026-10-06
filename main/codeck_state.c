@@ -176,6 +176,8 @@ unsigned codeck_retry_delay(codeck_status_t status, unsigned failures, uint32_t 
     unsigned shift = failures ? failures-1 : 0;
     if (shift > 5) shift = 5;
     unsigned base = 10000U << shift;
-    if (base > 300000) base = 300000;
+    const unsigned limit = status==CODECK_NETWORK_ERROR || status==CODECK_TLS_ERROR ||
+                           status==CODECK_DNS_ERROR || status==CODECK_CONNECT_TIMEOUT ? 60000U : 300000U;
+    if (base > limit) base = limit;
     return base + random % (base/10 + 1);
 }

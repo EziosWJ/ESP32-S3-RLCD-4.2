@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS "main.c" "rlcd.c" "shtc3.c" "battery.c" "wifi_setup.c" "portal_codec.c"
-         "button.c" "ui.c" "ui_pages.c" "codeck_demo.c" "codeck_client.c" "codeck_state.c" "codeck_page.c" "codeck_label.c" "brand_icons.c" "home_assistant.c" "ha_state.c" "clock_service.c"
+         "button.c" "ui.c" "ui_pages.c" "ui_chrome.c" "display_time.c" "codeck_client.c" "codeck_state.c" "codeck_page.c" "codeck_label.c" "brand_icons.c" "home_assistant.c" "ha_state.c" "clock_service.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES esp_system esp_hw_support esp_psram spi_flash heap freertos log
                   esp_driver_gpio esp_driver_spi esp_driver_i2c esp_adc

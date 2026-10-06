@@ -5,10 +5,12 @@
 #include "rlcd.h"
 #include "brand_icons.h"
 #include "codeck_label.h"
+#include "ui_chrome.h"
+#include "display_time.h"
 
 static const char *status_label(codeck_status_t s)
 {
-    switch(s) {
+    switch (s) {
     case CODECK_OK: return "ONLINE";
     case CODECK_WAIT_NETWORK: return "OFFLINE";
     case CODECK_WAIT_TIME: return "WAITING FOR SNTP";
@@ -25,122 +27,128 @@ static const char *status_label(codeck_status_t s)
     default: return "NETWORK ERROR";
     }
 }
-static void rounded_card(int x,int y,int width,int height)
-{
-    rlcd_hline(x+4,y,width-8); rlcd_hline(x+4,y+height-1,width-8);
-    for(int row=1;row<height-1;++row) {
-        const int inset=row==1 || row==height-2 ? 2 : row==2 || row==height-3 ? 1 : 0;
-        rlcd_hline(x+inset,y+row,1); rlcd_hline(x+width-1-inset,y+row,1);
-    }
-}
-static void time_text(const char *utc, char *out, size_t capacity, bool full)
-{
-    if(!utc[0]) { snprintf(out,capacity,"--"); return; }
-    snprintf(out,capacity,full ? "%.10s %.5s UTC" : "%.5s %.8s UTC",utc+(full ? 0 : 5),utc+11);
-}
-static unsigned account_sheets(const codeck_account_t *a)
-{
-    return a->observed && a->amount_count ? (a->amount_count+1)/2 : 1;
-}
+
 unsigned codeck_page_count(const codeck_snapshot_t *s)
 {
-    unsigned count=1;
-    if(s->has_snapshot && s->balances_available && s->account_count) {
-        for(unsigned i=0;i<s->account_count;++i) count+=account_sheets(&s->accounts[i]);
-    } else ++count;
-    return count;
+    return 1 + (s->has_snapshot && s->balances_available && s->account_count ? (s->account_count + 1) / 2 : 1);
 }
-static void quota(int x, const codeck_window_t *w)
+
+static void quota(int x, const char *name, const codeck_window_t *w)
 {
-    char text[64];
-    rounded_card(x,144,174,111);
-    rlcd_text(x+10,154,x==20 ? "PRIMARY" : "SECONDARY",2);
-    if(!w->valid) {
-        rlcd_text(x+10,180,"--",4); rlcd_text(x+10,226,"UNAVAILABLE",1); return;
+    char text[48], reset[24];
+    ui_draw_card(x, 192, 174, 102);
+    rlcd_text(x + 10, 202, name, 2);
+    if (w->valid) {
+        snprintf(text, sizeof(text), "%.0f%%", 100 - w->used_percent);
+        rlcd_text(x + 10, 224, text, 3);
+        rlcd_text(x + 94, 234, "LEFT", 1);
+    } else rlcd_text(x + 10, 224, "--", 3);
+    rlcd_rect(x + 10, 252, 154, 7);
+    if (w->valid) {
+        const int width = (int)((100 - w->used_percent) * 150 / 100);
+        for (int y = 254; y < 257; ++y) rlcd_hline(x + 12, y, width);
     }
-    snprintf(text,sizeof(text),"%.0f%% LEFT",100-w->used_percent);
-    rlcd_text(x+10,179,text,3);
-    snprintf(text,sizeof(text),"%.1f%% USED",w->used_percent); rlcd_text(x+10,207,text,1);
-    rlcd_rect(x+10,222,154,7);
-    const int width=(int)((100-w->used_percent)*150/100);
-    for(int y=224;y<227;++y) rlcd_hline(x+12,y,width);
-    char reset[32]; time_text(w->resets_at,reset,sizeof(reset),true);
-    snprintf(text,sizeof(text),"RESET %s",reset); rlcd_text(x+10,241,text,1);
+    display_time_format(w->valid ? w->resets_at : "", reset, sizeof(reset), true);
+    rlcd_text(x + 10, 270, "RESET", 1);
+    rlcd_text(x + 10, 282, reset, 1);
 }
+
+static void status_item(int x, int y, ui_icon_t icon, const char *text)
+{
+    ui_draw_icon(icon, x, y);
+    rlcd_text(x + 22, y + 3, text, 1);
+}
+
 static void overview(const codeck_snapshot_t *s)
 {
-    char text[48];
-    const bool cached=s->status!=CODECK_OK;
-    rlcd_text(20,72,!s->has_snapshot ? "SERVICE --" : s->service_available ? "SERVICE OK" : "SERVICE DOWN",2);
-    rlcd_text(224,72,!s->has_snapshot ? "CLI --" : s->codex_cli_available ? "CLI OK" : "CLI DOWN",2);
-    rlcd_text(20,94,!s->has_snapshot ? "SCHEDULER --" : s->scheduler_enabled ? "SCHEDULER ON" : "SCHEDULER OFF",2);
-    if(s->has_snapshot) snprintf(text,sizeof(text),"%s %u",cached ? "LAST" : "RUN",s->running_tasks);
-    else strcpy(text,"RUN --");
-    rlcd_text(224,94,text,strlen(text)>13 ? 1 : 2);
-    brand_icon_draw(BRAND_ICON_CODEX_TERMINAL,20,114,24); rlcd_text(52,120,"CODEX QUOTA",2);
-    char obs[32]; time_text(s->quota_observed_at,obs,sizeof(obs),false);
-    snprintf(text,sizeof(text),"OBS %s",obs); rlcd_text(218,123,text,1);
-    codeck_window_t empty={0};
-    quota(20,s->quota_available ? &s->windows[0] : &empty);
-    quota(206,s->quota_available ? &s->windows[1] : &empty);
+    char text[48], observed[24];
+    brand_icon_draw(BRAND_ICON_OPENAI, 20, 96, 32);
+    rlcd_text(60, 103, "CODEX CLI", 2);
+    display_time_format(s->quota_observed_at, observed, sizeof(observed), false);
+    snprintf(text, sizeof(text), "OBS %s", observed);
+    rlcd_text(218, 108, text, 1);
+    status_item(30, 137, UI_ICON_CLI, !s->has_snapshot ? "CLI --" : s->codex_cli_available ? "CLI OK" : "CLI DOWN");
+    if (s->has_snapshot) snprintf(text, sizeof(text), "%s %u", s->status == CODECK_OK ? "RUN" : "LAST RUN", s->running_tasks);
+    else strcpy(text, "RUN --");
+    status_item(218, 137, UI_ICON_RUN, text);
+    status_item(30, 164, UI_ICON_CLOCK, !s->has_snapshot ? "SCHED --" : s->scheduler_enabled ? "SCHED ON" : "SCHED OFF");
+    status_item(218, 164, UI_ICON_SERVICE, !s->has_snapshot ? "SERVICE --" : s->service_available ? "SERVICE OK" : "SERVICE DOWN");
+    const codeck_window_t empty = {0};
+    quota(20, "5H", s->has_snapshot && s->quota_available ? &s->windows[0] : &empty);
+    quota(206, "7DAY", s->has_snapshot && s->quota_available ? &s->windows[1] : &empty);
 }
-static void amount_row(int y,const codeck_amount_t *v)
+
+static void amount_row(int y, const codeck_amount_t *amount, unsigned count)
 {
-    char formatted[72],text[88];
-    if(!codeck_amount_format(v->amount,formatted,sizeof(formatted))) strcpy(formatted,"--");
-    snprintf(text,sizeof(text),"%s %s",v->currency,formatted);
-    unsigned scale=strlen(text)<=19 ? 3 : strlen(text)<=28 ? 2 : 1;
-    if(strlen(text)<=56) rlcd_text(30,y,text,scale);
+    char decimal[72], text[88];
+    if (!codeck_amount_format(amount->amount, decimal, sizeof(decimal))) strcpy(decimal, "--");
+    snprintf(text, sizeof(text), "%s %s", amount->currency, decimal);
+    const size_t length = strlen(text);
+    const unsigned scale = count == 1 && length <= 19 ? 3 : count <= 2 && length <= 28 ? 2 : 1;
+    if (length <= 56) rlcd_text(30, y, text, scale);
     else {
-        char first[57]; memcpy(first,text,56); first[56]=0;
-        rlcd_text(30,y,first,1); rlcd_text(30,y+12,text+56,1);
+        rlcd_text(30, y, amount->currency, 1);
+        ui_draw_decimal(84, y + 1, decimal);
     }
 }
-static void balance(const codeck_snapshot_t *s,unsigned sheet)
+
+static void account_card(const codeck_snapshot_t *s, unsigned index, int y)
 {
-    if(!s->has_snapshot || !s->balances_available || !s->account_count) {
-        rounded_card(20,75,360,177); rlcd_text(34,99,"BALANCES",2); rlcd_text(34,133,"--",4);
-        rlcd_text(34,180,!s->has_snapshot ? "NO SUCCESSFUL SNAPSHOT" : !s->balances_available ? "BALANCES UNAVAILABLE" : "NO BALANCE CONFIGS",2);
+    const codeck_account_t *a = &s->accounts[index];
+    ui_draw_card(20, y, 360, 98);
+    const brand_icon_t icon = strcmp(a->provider, "deepseek") == 0 ? BRAND_ICON_DEEPSEEK :
+                              strcmp(a->provider, "openrouter") == 0 ? BRAND_ICON_OPENROUTER : BRAND_ICON_COUNT;
+    if (icon != BRAND_ICON_COUNT) brand_icon_draw(icon, 30, y + 10, 24);
+    else ui_draw_icon(UI_ICON_WALLET, 34, y + 13);
+    codeck_label_lines(64, y + 9, a->name, 304, 2);
+    const bool known = a->observed && a->amount_count;
+    if (known) {
+        const int step = a->amount_count > 2 ? 9 : 18;
+        for (unsigned i = 0; i < a->amount_count; ++i)
+            amount_row(y + 44 + (int)i * step, &a->amounts[i], a->amount_count);
+    } else rlcd_text(30, y + 47, "-- / NO OBSERVATION", 2);
+    char observed[24], provider[21], text[80];
+    for (unsigned i = 0; i < sizeof(provider) - 1; ++i) {
+        provider[i] = (char)toupper((unsigned char)a->provider[i]);
+        if (!provider[i]) break;
+    }
+    provider[sizeof(provider) - 1] = 0;
+    display_time_format(a->observed_at, observed, sizeof(observed), false);
+    snprintf(text, sizeof(text), "%s %s %s%s", provider, observed,
+             !known ? "NO DATA" : a->stale ? "OLD" : "LIVE",
+             s->status != CODECK_OK ? " CACHED" : "");
+    rlcd_text(30, y + 85, text, 1);
+}
+
+static void balances(const codeck_snapshot_t *s, unsigned sheet)
+{
+    if (!s->has_snapshot || !s->balances_available || !s->account_count) {
+        ui_draw_card(20, 94, 360, 200);
+        ui_draw_icon(UI_ICON_WALLET, 34, 110);
+        rlcd_text(58, 110, "BALANCES", 2);
+        rlcd_text(34, 148, "--", 4);
+        rlcd_text(34, 208, !s->has_snapshot ? "NO SUCCESSFUL SNAPSHOT" :
+                  !s->balances_available ? "BALANCES UNAVAILABLE" : "NO BALANCE CONFIGS", 2);
         return;
     }
-    unsigned offset=sheet-1,index=0;
-    while(index+1<s->account_count && offset>=account_sheets(&s->accounts[index])) {
-        offset-=account_sheets(&s->accounts[index++]);
-    }
-    const codeck_account_t *a=&s->accounts[index];
-    rounded_card(20,72,360,184);
-    brand_icon_t icon=strcmp(a->provider,"deepseek")==0 ? BRAND_ICON_DEEPSEEK :
-                      strcmp(a->provider,"openrouter")==0 ? BRAND_ICON_OPENROUTER : BRAND_ICON_COUNT;
-    brand_icon_draw(icon,30,82,24);
-    char provider[32];
-    for(unsigned i=0;i<sizeof(provider);++i) { provider[i]=(char)toupper((unsigned char)a->provider[i]); if(!provider[i]) break; }
-    rlcd_text(64,82,provider,strlen(provider)>15 ? 1 : 2);
-    // Name renderer supports UTF-8 account labels; full source stays in snapshot.
-    codeck_label_text(30,108,a->name,340);
-    const bool known=a->observed && a->amount_count;
-    if(known) {
-        unsigned first=offset*2;
-        amount_row(137,&a->amounts[first]);
-        if(first+1<a->amount_count) amount_row(174,&a->amounts[first+1]);
-    } else { rlcd_text(30,141,"--",4); rlcd_text(30,181,"NO SUCCESSFUL OBSERVATION",1); }
-    char observed[40],text[64]; time_text(a->observed_at,observed,sizeof(observed),true);
-    snprintf(text,sizeof(text),"UPDATED %s",observed); rlcd_text(30,225,text,1);
-    rlcd_text(30,242,!known ? "NO DATA" : a->stale ? "OLD DATA" : "CURRENT",1);
-    if(s->status!=CODECK_OK && s->has_snapshot) rlcd_text(140,242,"CACHED SNAPSHOT",1);
-    snprintf(text,sizeof(text),"ACCOUNT %u OF %u",index+1,s->account_count); rlcd_text(260,242,text,1);
+    const unsigned first = (sheet - 1) * 2;
+    account_card(s, first, 94);
+    if (first + 1 < s->account_count) account_card(s, first + 1, 196);
 }
-void draw_codeck_page(const codeck_snapshot_t *s,unsigned sheet)
+
+// The UI owns the common HEADER; this renderer draws only the content area.
+void draw_codeck_page(const codeck_snapshot_t *s, unsigned sheet)
 {
-    char text[64],time[32];
-    sheet%=codeck_page_count(s);
-    rlcd_text(20,10,"CODECK",3);
-    rlcd_text(284,16,s->has_snapshot ? s->status==CODECK_OK ? "LIVE DATA" : "LAST KNOWN" : "NO SNAPSHOT",1);
-    rlcd_text(20,39,status_label(s->status),2); rlcd_hline(20,61,360);
-    if(sheet==0) overview(s); else balance(s,sheet);
-    rlcd_hline(20,265,360);
-    time_text(s->generated_at,time,sizeof(time),true);
-    snprintf(text,sizeof(text),"%s %s",s->has_snapshot && s->status!=CODECK_OK ? "CACHED" : "SNAPSHOT",time);
-    rlcd_text(20,273,text,1);
-    snprintf(text,sizeof(text),"2 OF 4  CODECK %u OF %u",sheet+1,codeck_page_count(s)); rlcd_text(20,288,text,1);
-    rlcd_text(224,288,"12S AUTO  KEY NEXT",1);
+    char text[80], time[24];
+    sheet %= codeck_page_count(s);
+    rlcd_text(20, 62, status_label(s->status), 1);
+    rlcd_text(278, 62, !s->has_snapshot ? "NO SNAPSHOT" : s->status == CODECK_OK ? "LIVE DATA" : "LAST KNOWN", 1);
+    display_time_format(s->generated_at, time, sizeof(time), true);
+    snprintf(text, sizeof(text), "%s %s", s->has_snapshot && s->status != CODECK_OK ? "CACHED" : "SNAPSHOT", time);
+    rlcd_text(20, 78, text, 1);
+    if (s->fetching) strcpy(text, "CONNECTING");
+    else if (s->retry_seconds) snprintf(text, sizeof(text), "RETRY %uS", s->retry_seconds);
+    else text[0] = 0;
+    if (text[0]) rlcd_text(284, 78, text, 1);
+    if (!sheet) overview(s); else balances(s, sheet);
 }

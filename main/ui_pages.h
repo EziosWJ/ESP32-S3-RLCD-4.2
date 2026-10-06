@@ -19,7 +19,5 @@ typedef struct {
 } ui_model_t;
 
 void draw_sensor_page(const ui_model_t *model);
-void draw_network_page(const ui_model_t *model);
-void draw_system_page(const ui_model_t *model);
+void draw_network_page(const ui_model_t *model, unsigned screen);
 void draw_setup_page(const ui_model_t *model);
-void draw_page_footer(ui_page_t page, bool setup);
