@@ -11,8 +11,10 @@ static ui_page_t current_page;
 static ui_model_t model;
 static bool dirty, setup_visible, portal_was_active;
 #define NETWORK_SCREEN_COUNT 3U
+#define SENSOR_SCREEN_COUNT 2U
 static unsigned codeck_frame;
 static unsigned network_frame;
+static unsigned sensor_frame;
 static codeck_snapshot_t codeck, codeck_next;
 
 void ui_init(bool wifi_available, const ui_system_info_t *system)
@@ -25,6 +27,7 @@ void ui_init(bool wifi_available, const ui_system_info_t *system)
     dirty = true;
     setup_visible = portal_was_active = false;
     codeck_frame = network_frame = 0;
+    sensor_frame = 0;
     memset(&codeck, 0, sizeof(codeck));
     codeck.status = CODECK_WAIT_NETWORK;
 }
@@ -67,6 +70,9 @@ void ui_scroll(void)
     } else if (current_page == PAGE_NETWORK) {
         network_frame = (network_frame + 1) % NETWORK_SCREEN_COUNT;
         dirty = true;
+    } else if (current_page == PAGE_SENSOR) {
+        sensor_frame = (sensor_frame + 1) % SENSOR_SCREEN_COUNT;
+        dirty = true;
     }
 }
 
@@ -84,7 +90,7 @@ void ui_update_measurement(bool valid, float temperature, float humidity, const 
     model.temperature = temperature;
     model.humidity = humidity;
     model.status = status;
-    if (current_page == PAGE_SENSOR || setup_visible) {
+    if ((current_page == PAGE_SENSOR && sensor_frame == 0) || setup_visible) {
         dirty = true;
     }
 }
@@ -112,6 +118,7 @@ esp_err_t ui_render(void)
 {
     ha_snapshot_t ha;
     home_assistant_get_snapshot(&ha);
+    bool ha_changed = false;
     for (unsigned i = 0; i < HA_DEVICE_COUNT; ++i) {
         const ha_device_t *old = &model.ha.devices[i];
         const ha_device_t *next = &ha.devices[i];
@@ -119,9 +126,18 @@ esp_err_t ui_render(void)
             old->humidity.status != next->humidity.status ||
             old->temperature.value != next->temperature.value ||
             old->humidity.value != next->humidity.value) {
-            if (current_page == PAGE_SENSOR && !setup_visible) dirty = true;
+            ha_changed = true;
         }
     }
+    for (unsigned i = 0; i < HA_HOST_ENTITY_COUNT; ++i) {
+        const ha_value_t *old = &model.ha.host[i];
+        const ha_value_t *next = &ha.host[i];
+        if (old->status != next->status || old->value != next->value ||
+            strcmp(old->unit, next->unit) != 0 || strcmp(old->text, next->text) != 0) {
+            ha_changed = true;
+        }
+    }
+    if (ha_changed && current_page == PAGE_SENSOR && !setup_visible) dirty = true;
     model.ha = ha;
     if (model.wifi_available) {
         wifi_setup_status_t wifi;
@@ -184,15 +200,17 @@ esp_err_t ui_render(void)
     const char *title = setup_visible ? "WIFI SETUP" : current_page == PAGE_SENSOR ? "SENSOR" :
                         current_page == PAGE_CODECK ? "CODECK" : "DEVICE";
     const unsigned frame = setup_visible ? 0 : current_page == PAGE_CODECK ? codeck_frame :
-                           current_page == PAGE_NETWORK ? network_frame : 0;
+                           current_page == PAGE_NETWORK ? network_frame :
+                           current_page == PAGE_SENSOR ? sensor_frame : 0;
     const unsigned count = setup_visible ? 1 : current_page == PAGE_CODECK ? codeck_page_count(&codeck) :
-                           current_page == PAGE_NETWORK ? NETWORK_SCREEN_COUNT : 1;
+                           current_page == PAGE_NETWORK ? NETWORK_SCREEN_COUNT :
+                           current_page == PAGE_SENSOR ? SENSOR_SCREEN_COUNT : 1;
     ui_draw_header(title, &timed_header, frame, count);
     if (setup_visible) {
         draw_setup_page(&model);
     } else {
         switch (current_page) {
-        case PAGE_SENSOR: draw_sensor_page(&model); break;
+        case PAGE_SENSOR: draw_sensor_page(&model, sensor_frame); break;
         case PAGE_CODECK: draw_codeck_page(&codeck,codeck_frame); break;
         case PAGE_NETWORK: draw_network_page(&model, network_frame); break;
         default: break;

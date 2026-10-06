@@ -19,6 +19,6 @@ typedef struct {
     battery_reading_t battery;
 } ui_model_t;
 
-void draw_sensor_page(const ui_model_t *model);
+void draw_sensor_page(const ui_model_t *model, unsigned screen);
 void draw_network_page(const ui_model_t *model, unsigned screen);
 void draw_setup_page(const ui_model_t *model);

@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <string.h>
 #include "esp_system.h"
 #include "board_config.h"
 #include "rlcd.h"
@@ -52,18 +53,59 @@ static void sensor_card(int y, const char *name, const char *status,
     rlcd_text(222, y + 30, text, 3);
 }
 
-void draw_sensor_page(const ui_model_t *m)
+static void host_metric_card(int x, int y, int width, int height, const char *name,
+                             const ha_value_t *value, bool uptime)
 {
-    static const char *names[HA_DEVICE_COUNT] = {"LIVING ROOM", "STUDY"};
-    sensor_card(60, "LOCAL SHTC3", m->valid ? "LIVE" : "READ ERROR",
-                m->valid, m->temperature, m->valid, m->humidity);
-    for (unsigned i = 0; i < HA_DEVICE_COUNT; ++i) {
-        const ha_device_t *d = &m->ha.devices[i];
-        const ha_value_status_t status = d->temperature.status != HA_LIVE ?
-                                          d->temperature.status : d->humidity.status;
-        sensor_card(128 + (int)i * 68, names[i], ha_status(status),
-                    d->temperature.status == HA_LIVE, d->temperature.value,
-                    d->humidity.status == HA_LIVE, d->humidity.value);
+    char text[40];
+    unsigned value_scale = 2;
+    ui_draw_card(x, y, width, height);
+    rlcd_text(x + 8, y + 4, name, 1);
+    rlcd_text(x + width - 60, y + 4, ha_status(value->status), 1);
+    if (value->status == HA_LIVE) {
+        if (uptime) snprintf(text, sizeof(text), "%s", value->text);
+        else if (value->unit[0]) snprintf(text, sizeof(text), "%.1f %s", (double)value->value, value->unit);
+        else snprintf(text, sizeof(text), "%.1f", (double)value->value);
+    } else {
+        snprintf(text, sizeof(text), "--");
+    }
+    const unsigned max_chars = (unsigned)(width - 18) / (6U * value_scale);
+    if (strlen(text) > max_chars) value_scale = 1;
+    const unsigned fit_chars = (unsigned)(width - 18) / (6U * value_scale);
+    if (strlen(text) > fit_chars && fit_chars >= 4) {
+        text[fit_chars - 3] = '.';
+        text[fit_chars - 2] = '.';
+        text[fit_chars - 1] = '.';
+        text[fit_chars] = '\0';
+    }
+    rlcd_text(x + 8, y + 21, text, value_scale);
+}
+
+void draw_sensor_page(const ui_model_t *m, unsigned screen)
+{
+    if (screen == 0) {
+        static const char *names[HA_DEVICE_COUNT] = {"LIVING ROOM", "STUDY"};
+        sensor_card(60, "LOCAL SHTC3", m->valid ? "LIVE" : "READ ERROR",
+                    m->valid, m->temperature, m->valid, m->humidity);
+        for (unsigned i = 0; i < HA_DEVICE_COUNT; ++i) {
+            const ha_device_t *d = &m->ha.devices[i];
+            const ha_value_status_t status = d->temperature.status != HA_LIVE ?
+                                              d->temperature.status : d->humidity.status;
+            sensor_card(128 + (int)i * 68, names[i], ha_status(status),
+                        d->temperature.status == HA_LIVE, d->temperature.value,
+                        d->humidity.status == HA_LIVE, d->humidity.value);
+        }
+        return;
+    }
+
+    if (screen == 1) {
+        host_metric_card(20, 59, 175, 48, "CPU", &m->ha.host[HA_HOST_CPU_USAGE], false);
+        host_metric_card(205, 59, 175, 48, "MEMORY", &m->ha.host[HA_HOST_MEMORY_USAGE], false);
+        host_metric_card(20, 112, 175, 48, "DISK", &m->ha.host[HA_HOST_DISK_USAGE], false);
+        host_metric_card(205, 112, 175, 48, "CPU TEMP", &m->ha.host[HA_HOST_CPU_TEMPERATURE], false);
+        host_metric_card(20, 165, 360, 48, "UPTIME", &m->ha.host[HA_HOST_UPTIME], true);
+        host_metric_card(20, 218, 175, 48, "NET RX", &m->ha.host[HA_HOST_NETWORK_RECEIVE_RATE], false);
+        host_metric_card(205, 218, 175, 48, "NET TX", &m->ha.host[HA_HOST_NETWORK_TRANSMIT_RATE], false);
+        return;
     }
 }
 

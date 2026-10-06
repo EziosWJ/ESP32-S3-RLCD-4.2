@@ -20,25 +20,25 @@
 
 | 卡片 | 温度实体 | 湿度实体 |
 | --- | --- | --- |
-| 客厅 | `sensor.xiaomi_c24_08dc_temperature` | `sensor.xiaomi_c24_08dc_relative_humidity` |
-| 书房 | `sensor.xiaomi_h39h00_47aa_temperature` | `sensor.xiaomi_h39h00_47aa_relative_humidity` |
+| 客厅 | `sensor.<living_room_temperature_entity>` | `sensor.<living_room_humidity_entity>` |
+| 书房 | `sensor.<study_temperature_entity>` | `sensor.<study_humidity_entity>` |
 
 传感器页按 BOOT 翻屏：首屏显示上述温湿度卡片；第二屏以双列紧凑卡片集中显示 Host Monitor 的 CPU、内存、磁盘使用率、CPU 温度、运行时间和网络收发速率。主机数值旁显示 HA 返回的 `attributes.unit_of_measurement`；UPTIME 按返回的 RFC3339 时间换算为 UTC+8；RLCD 内置字体不含度数符号，因此 `°C` 显示为 `C`。
 
 | 用途 | 实体 ID |
 | --- | --- |
-| CPU 使用率 | `sensor.miwifi_rd15_srv_cpu_usage` |
-| 内存使用率 | `sensor.miwifi_rd15_srv_memory_usage` |
-| 磁盘使用率 | `sensor.miwifi_rd15_srv_disk_usage` |
-| CPU 温度 | `sensor.miwifi_rd15_srv_cpu_temperature` |
-| 运行时间 | `sensor.miwifi_rd15_srv_uptime` |
-| 网络接收速率 | `sensor.miwifi_rd15_srv_network_receive_rate` |
-| 网络发送速率 | `sensor.miwifi_rd15_srv_network_transmit_rate` |
+| CPU 使用率 | `sensor.<cpu_usage_entity>` |
+| 内存使用率 | `sensor.<memory_usage_entity>` |
+| 磁盘使用率 | `sensor.<disk_usage_entity>` |
+| CPU 温度 | `sensor.<cpu_temperature_entity>` |
+| 运行时间 | `sensor.<uptime_entity>` |
+| 网络接收速率 | `sensor.<network_receive_entity>` |
+| 网络发送速率 | `sensor.<network_transmit_entity>` |
 
-- HA 地址在 `main/board_config.h` 的 `BOARD_HA_URL`，默认 `http://192.168.31.41:8123`。ESP32 应连接到可访问该地址的家庭局域网。
+- HA 地址在 `main/board_config.h` 的 `BOARD_HA_URL`，由本地配置指定。ESP32 应连接到可访问该地址的家庭局域网。
 - 将长期访问令牌单独放在项目根目录 `rc.key`，无需添加 `Bearer` 或引号；支持末尾换行及 UTF-8 BOM。构建时嵌入固件，所有请求添加 `Authorization: Bearer <token>`，协议依据 [HA REST API 文档](https://developers.home-assistant.io/docs/api/rest/)。令牌不输出到日志，`rc.key` 已被 Git 忽略；构建产物包含令牌，应作为私有文件保存。修改令牌后须重新构建并烧录；首次添加或删除文件时先运行 `idf.py reconfigure`。
 - 没有 `rc.key` 也可编译，此时 HA 实体显示 `NO TOKEN`，本机传感器正常工作。
-- 独立后台任务逐个 GET 四个温湿度实体和七个 Host Monitor 实体，地址为 `http://192.168.31.41:8123/api/states/<entity_id>`，完成一轮后等待 **15 秒**，单次 HTTP 操作超时 **4 秒**，响应限制为 4095 字节；请求使用 `Authorization: Bearer <token>`，读取 `state` 和 `attributes.unit_of_measurement`；不读取整个实体列表，不执行空调控制。轮询间隔、超时和过期时间均在 `main/board_config.h`。
+- 独立后台任务逐个 GET 四个温湿度实体和七个 Host Monitor 实体，地址为 `http://<home-assistant-host>:8123/api/states/<entity_id>`，完成一轮后等待 **15 秒**，单次 HTTP 操作超时 **4 秒**，响应限制为 4095 字节；请求使用 `Authorization: Bearer <token>`，读取 `state` 和 `attributes.unit_of_measurement`；不读取整个实体列表，不执行空调控制。轮询间隔、超时和过期时间均在 `main/board_config.h`。
 - `unknown`、`unavailable` 或无效数值显示占位符；401/403 显示 `AUTH ERROR`，404 显示 `NOT FOUND`，网络或响应读取异常显示 `READ ERROR`。断网立即隐藏 HA 当前值，超过 **45 秒**未成功读取的数据显示 `STALE`。每个实体独立更新，单项失败不影响其余读数。连接恢复后自动读取。
 - UI 只读取任务快照，所有屏幕绘制仍在主任务中；本机 SHTC3 保持每 2 秒采样，按键轮询保持 20 ms。
 
@@ -87,7 +87,7 @@ python tests/test_ha_state.py --zig <zig.exe路径>
 
 连接使用域名解析得到的 IPv4 地址，仍以原域名进行 SNI 和主机名校验，不固定服务器 IP。单次网络操作超时为 `BOARD_CODECK_TIMEOUT_MS`（20 秒）。页面分别显示 `DNS ERROR`、`CONNECTION TIMEOUT` 和 `TLS CONNECTION ERROR`。串口诊断仅记录请求阶段、耗时和数字错误码，不记录请求头或凭据。`Failed to open new connection in specified timeout` 表示尚未收到 HTTP 响应；旧日志中的 `status 7` 是内部网络错误状态，不是 HTTP 状态码。电脑端请求成功不能证明设备网络路径可达；如烧录后仍失败，可通过新的 `Snapshot transport` 日志区分失败阶段。
 
-证书 bundle 需开启 `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y`，配置已写入 `sdkconfig.defaults` 并同步当前 `sdkconfig`。本地 SDK 默认关闭此项；服务器在 2026-10-06 返回的链包含 WE1 → GTS Root R4 → GlobalSign 的交叉签名证书，旧模式可能沿链寻找 bundle 中已无的 GlobalSign 旧根而失败。开启后可选择 bundle 中受信任的 GTS Root R4 验证链，不添加叶证书、不关闭验证。已有项目只改 defaults 不会覆盖当前 sdkconfig，重新配置后应确认 `build/config/sdkconfig.h` 中该项为 1。可用 `python tests/probe_codeck.py --ca-file D:/esp/v6.1/esp-idf/components/mbedtls/esp_crt_bundle/cacrt_all.pem` 验证接口在 SDK 根证书集合下可达；此主机检查不代替板上握手验收。
+证书 bundle 需开启 `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y`，配置已写入 `sdkconfig.defaults` 并同步当前 `sdkconfig`。本地 SDK 默认关闭此项；服务器在 2026-10-06 返回的链包含 WE1 → GTS Root R4 → GlobalSign 的交叉签名证书，旧模式可能沿链寻找 bundle 中已无的 GlobalSign 旧根而失败。开启后可选择 bundle 中受信任的 GTS Root R4 验证链，不添加叶证书、不关闭验证。已有项目只改 defaults 不会覆盖当前 sdkconfig，重新配置后应确认 `build/config/sdkconfig.h` 中该项为 1。可用 `python tests/probe_codeck.py --ca-file $env:IDF_PATH/components/mbedtls/esp_crt_bundle/cacrt_all.pem` 验证接口在 SDK 根证书集合下可达；此主机检查不代替板上握手验收。
 
 **页面与数据**：KEY 切换环境 → Codeck → 网络/系统；BOOT 手动翻屏。Codeck 首屏使用官方 OpenAI Blossom，显示 CLI、RUN、SCHED、SERVICE 四项图标状态，以及 **5H、7Day 剩余额度**和重置时间。SCHED 只表示调度器开关，不是运行计时器。随后每屏两个账户，整行卡片上下排列；每个账户的全部币种留在同一卡片，单币种大字、多币种分行，名称最多两行后省略。长金额使用窄数字字形完整显示，不裁切高位，不合计币种。没有自动轮播或固定 Footer，阅读位置保留。
 
@@ -156,7 +156,7 @@ SHTC3 采用唤醒 `0x3517` → 普通模式测量 `0x7866`（温度先返回、
 屏幕初始化寄存器、复位时序和横屏像素排列参考用户指定的本地示例：
 
 ```text
-D:\workspace\ESP32\ESP32-S3-RLCD-4.2-Demo\02_ESP-IDF\10_FactoryProgram
+<本地出厂示例目录>
 ```
 
 主要参考文件为 `main/main.cpp`、`main/user_config.h`、`components/port_bsp/display_bsp.cpp` 和 `components/port_bsp/i2c_equipment.*`。该示例的 `user_config.h` 写的是 300 × 400，但 `main.cpp` 实际传给显示驱动的是 **400 × 300**；本工程采用后者，并保留本地版本的屏幕初始化参数。TE 引脚当前未使用。
@@ -218,19 +218,19 @@ RLCD 利用环境光反射成像，没有背光；环境越明亮，显示越清
 
 ## 开发环境
 
-| 项目 | 当前本机配置 |
+| 项目 | 开发环境参考 |
 | --- | --- |
 | 框架 | ESP-IDF V6.1.0 |
-| SDK 路径 | `D:\esp\v6.1\esp-idf` |
-| Python 虚拟环境 | `C:\Espressif\tools\python\v6.1\venv` |
-| 工具目录 | `C:\Espressif\tools` |
-| 工程目录 | `D:\workspace\ESP32\RLCD` |
+| SDK 路径 | ``$IDF_PATH`` |
+| Python 虚拟环境 | `ESP-IDF 导出的 Python 环境` |
+| 工具目录 | `ESP-IDF 工具目录` |
+| 工程目录 | `仓库根目录` |
 | 目标芯片 | `esp32s3` |
 | 编辑器 | VS Code + Espressif ESP-IDF 扩展 |
-| 配置的烧录端口 | `COM9`，实际端口以设备枚举结果为准 |
+| 配置的烧录端口 | `COMx`，实际端口以设备枚举结果为准 |
 | 调试配置 | `board/esp32s3-builtin.cfg` |
 
-本机 SDK 的 `tools/cmake/version.cmake` 声明版本为 `6.1.0`；`idf.py --version` 可能同时包含开发分支和提交信息。以实际安装版本输出为准。
+SDK 的 `tools/cmake/version.cmake` 声明版本为 `6.1.0`；`idf.py --version` 可能同时包含开发分支和提交信息。以实际安装版本输出为准。
 
 微雪当前文档要求 ESP-IDF 5.5.0 及以上；官方示例的依赖不自动等同于兼容 6.1.0，接入外设时需要逐项验证。
 
@@ -274,7 +274,7 @@ RLCD/
 在 VS Code 中运行 **ESP-IDF: Open ESP-IDF Terminal**，确认终端激活本机 6.1 环境，再执行：
 
 ```powershell
-Set-Location D:\workspace\ESP32\RLCD
+Set-Location 仓库根目录
 idf.py --version
 idf.py build
 ```
@@ -284,10 +284,10 @@ idf.py build
 连接设备后，按实际串口执行：
 
 ```powershell
-idf.py -p COM9 flash monitor
+idf.py -p COMx flash monitor
 ```
 
-用 `Ctrl+]` 退出串口监视器。也可以分别执行 `idf.py -p COM9 flash` 和 `idf.py -p COM9 monitor`。
+用 `Ctrl+]` 退出串口监视器。也可以分别执行 `idf.py -p COMx flash` 和 `idf.py -p COMx monitor`。
 
 配置和体积检查：
 

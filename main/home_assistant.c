@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "board_config.h"
+#include "display_time.h"
 #include "ha_state.h"
 #include "wifi_setup.h"
 
@@ -23,6 +24,15 @@ static char authorization[HA_TOKEN_MAX + 8];
 static const char *entities[HA_DEVICE_COUNT][2] = {
     {"sensor.xiaomi_c24_08dc_temperature", "sensor.xiaomi_c24_08dc_relative_humidity"},
     {"sensor.xiaomi_h39h00_47aa_temperature", "sensor.xiaomi_h39h00_47aa_relative_humidity"},
+};
+static const char *host_entities[HA_HOST_ENTITY_COUNT] = {
+    "sensor.miwifi_rd15_srv_cpu_usage",
+    "sensor.miwifi_rd15_srv_memory_usage",
+    "sensor.miwifi_rd15_srv_disk_usage",
+    "sensor.miwifi_rd15_srv_cpu_temperature",
+    "sensor.miwifi_rd15_srv_uptime",
+    "sensor.miwifi_rd15_srv_network_receive_rate",
+    "sensor.miwifi_rd15_srv_network_transmit_rate",
 };
 
 static bool load_token(void)
@@ -57,9 +67,13 @@ static void set_status(ha_snapshot_t *snapshot, ha_value_status_t status)
         snapshot->devices[i].temperature.status = status;
         snapshot->devices[i].humidity.status = status;
     }
+    for (unsigned i = 0; i < HA_HOST_ENTITY_COUNT; ++i) {
+        snapshot->host[i].status = status;
+    }
 }
 
-static void read_entity(const char *entity, bool humidity, ha_value_t *value, char *body)
+static void read_entity(const char *entity, bool humidity, int host_entity,
+                        ha_value_t *value, char *body)
 {
     value->status = HA_READ_ERROR;
     char url[192];
@@ -84,9 +98,32 @@ static void read_entity(const char *entity, bool humidity, ha_value_t *value, ch
             if (length > 0 && length < HA_BODY_SIZE - 1 &&
                 esp_http_client_is_complete_data_received(client)) {
                 body[length] = '\0';
-                float number;
-                if (ha_state_parse(body, entity, humidity, &number)) {
-                    value->value = number;
+                float number = 0;
+                char unit[HA_UNIT_MAX] = {0};
+                char state[64];
+                char uptime[sizeof(value->text)];
+                bool parsed;
+                if (host_entity == HA_HOST_UPTIME) {
+                    parsed = ha_state_parse_text(body, entity, state, sizeof(state)) &&
+                             display_time_format(state, uptime, sizeof(uptime), true);
+                    if (parsed) {
+                        parsed = strlen(uptime) + sizeof(" UTC+8") <= sizeof(value->text);
+                    }
+                } else if (host_entity >= 0) {
+                    parsed = ha_state_parse_number(body, entity, &number, unit, sizeof(unit));
+                } else {
+                    parsed = ha_state_parse(body, entity, humidity, &number);
+                }
+                if (parsed) {
+                    if (host_entity == HA_HOST_UPTIME) {
+                        const size_t length = strlen(uptime);
+                        memcpy(value->text, uptime, length);
+                        memcpy(value->text + length, " UTC+8", sizeof(" UTC+8"));
+                        value->unit[0] = '\0';
+                    } else {
+                        value->value = number;
+                        if (host_entity >= 0) memcpy(value->unit, unit, sizeof(value->unit));
+                    }
                     value->updated_ms = esp_timer_get_time() / 1000;
                     value->status = HA_LIVE;
                 } else {
@@ -122,7 +159,7 @@ static void worker(void *arg)
             for (unsigned i = 0; i < HA_DEVICE_COUNT; ++i) {
                 for (unsigned j = 0; j < 2; ++j) {
                     ha_value_t *value = j ? &snapshot.devices[i].humidity : &snapshot.devices[i].temperature;
-                    read_entity(entities[i][j], j == 1, value, body);
+                    read_entity(entities[i][j], j == 1, -1, value, body);
                     if (value->status == HA_AUTH_ERROR) {
                         set_status(&snapshot, HA_AUTH_ERROR);
                         ESP_LOGW(TAG, "Authentication failed; check rc.key");
@@ -130,6 +167,15 @@ static void worker(void *arg)
                     }
                     xQueueOverwrite(snapshots, &snapshot);
                 }
+            }
+            for (unsigned i = 0; i < HA_HOST_ENTITY_COUNT; ++i) {
+                read_entity(host_entities[i], false, (int)i, &snapshot.host[i], body);
+                if (snapshot.host[i].status == HA_AUTH_ERROR) {
+                    set_status(&snapshot, HA_AUTH_ERROR);
+                    ESP_LOGW(TAG, "Authentication failed; check rc.key");
+                    goto poll_done;
+                }
+                xQueueOverwrite(snapshots, &snapshot);
             }
 poll_done:
             xQueueOverwrite(snapshots, &snapshot);
@@ -176,6 +222,12 @@ void home_assistant_get_snapshot(ha_snapshot_t *snapshot)
                 if (wifi.state != WIFI_SETUP_CONNECTED) values[j]->status = HA_OFFLINE;
                 else if (now - values[j]->updated_ms > BOARD_HA_STALE_MS) values[j]->status = HA_STALE;
             }
+        }
+    }
+    for (unsigned i = 0; i < HA_HOST_ENTITY_COUNT; ++i) {
+        if (snapshot->host[i].status == HA_LIVE) {
+            if (wifi.state != WIFI_SETUP_CONNECTED) snapshot->host[i].status = HA_OFFLINE;
+            else if (now - snapshot->host[i].updated_ms > BOARD_HA_STALE_MS) snapshot->host[i].status = HA_STALE;
         }
     }
 }
