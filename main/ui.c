@@ -64,6 +64,16 @@ void ui_update_measurement(bool valid, float temperature, float humidity, const 
     }
 }
 
+void ui_update_battery(const battery_reading_t *reading)
+{
+    const bool changed = model.battery.valid != reading->valid ||
+                         model.battery.detected != reading->detected ||
+                         model.battery.voltage_mv != reading->voltage_mv ||
+                         model.battery.percent != reading->percent;
+    model.battery = *reading;
+    if (changed && current_page == PAGE_SYSTEM && !setup_visible) dirty = true;
+}
+
 esp_err_t ui_render(void)
 {
     ha_snapshot_t ha;

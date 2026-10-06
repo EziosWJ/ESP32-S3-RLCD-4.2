@@ -15,6 +15,7 @@
 
 #include "board_config.h"
 #include "button.h"
+#include "battery.h"
 #include "ui.h"
 #include "rlcd.h"
 #include "shtc3.h"
@@ -71,6 +72,11 @@ void app_main(void)
         .cores = chip_info.cores,
     };
     ui_init(wifi_available, &system);
+    const esp_err_t battery_err = battery_init();
+    const bool battery_available = battery_err == ESP_OK;
+    if (!battery_available) {
+        ESP_LOGW(TAG, "Battery ADC initialization failed: %s", esp_err_to_name(battery_err));
+    }
     if (wifi_available) {
         const esp_err_t ha_err = home_assistant_init();
         if (ha_err != ESP_OK) {
@@ -104,6 +110,14 @@ void app_main(void)
         }
         const int64_t now = esp_timer_get_time() / 1000;
         if (now >= next_sample) {
+            battery_reading_t battery = {0};
+            if (battery_available) {
+                const esp_err_t battery_read_err = battery_read(&battery);
+                if (battery_read_err != ESP_OK) {
+                    ESP_LOGW(TAG, "Battery read failed: %s", esp_err_to_name(battery_read_err));
+                }
+            }
+            ui_update_battery(&battery);
             float temperature = 0;
             float humidity = 0;
             const esp_err_t err = shtc3_read(&temperature, &humidity);

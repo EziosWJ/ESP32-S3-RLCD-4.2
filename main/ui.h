@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "esp_err.h"
+#include "battery.h"
 
 typedef enum {
     PAGE_SENSOR,
@@ -25,5 +26,6 @@ void ui_set_page(ui_page_t page);
 void ui_next_page(void);
 void ui_show_setup(void);
 void ui_update_measurement(bool valid, float temperature, float humidity, const char *status);
+void ui_update_battery(const battery_reading_t *reading);
 // Checks network changes and flushes only when a redraw is needed.
 esp_err_t ui_render(void);

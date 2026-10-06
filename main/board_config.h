@@ -25,6 +25,15 @@
 #define BOARD_TEMPERATURE_OFFSET_C (-4.0f)
 #define BOARD_SAMPLE_INTERVAL_MS 2000U
 
+// Factory adc_bsp.cpp: ADC1 channel 3 (GPIO 4), battery divider 1:3.
+#define BOARD_BATTERY_ADC_CHANNEL 3
+#define BOARD_BATTERY_DIVIDER_RATIO 3U
+#define BOARD_BATTERY_SAMPLE_COUNT 16U
+#define BOARD_BATTERY_EMPTY_MV 3000U
+#define BOARD_BATTERY_FULL_MV 4120U
+// Heuristic only: validate with USB power and an empty battery holder.
+#define BOARD_BATTERY_DETECT_MIN_MV 2000U
+
 // KEY: active-low GPIO 18, verified against the local factory button_bsp.c.
 #define BOARD_KEY_GPIO 18
 #define BOARD_KEY_DEBOUNCE_MS 40U

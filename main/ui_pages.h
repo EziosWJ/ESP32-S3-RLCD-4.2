@@ -15,6 +15,7 @@ typedef struct {
     ha_snapshot_t ha;
     ui_system_info_t system;
     clock_display_t clock;
+    battery_reading_t battery;
 } ui_model_t;
 
 void draw_sensor_page(const ui_model_t *model);

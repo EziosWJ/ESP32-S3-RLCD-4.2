@@ -93,15 +93,31 @@ void draw_system_page(const ui_model_t *m)
 {
     char text[64];
     header("SYSTEM INFO");
-    rlcd_text(20, 74, "ESP32-S3 RLCD 4.2", 2);
+    rlcd_text(20, 66, "ESP32-S3 RLCD 4.2", 2);
     snprintf(text, sizeof(text), "CPU CORES %u", m->system.cores);
-    rlcd_text(20, 110, text, 2);
+    rlcd_text(20, 90, text, 2);
     snprintf(text, sizeof(text), "FLASH %u MB", (unsigned)(m->system.flash_bytes / (1024U * 1024U)));
-    rlcd_text(20, 140, text, 2);
+    rlcd_text(20, 114, text, 2);
     snprintf(text, sizeof(text), "PSRAM %u MB", (unsigned)(m->system.psram_bytes / (1024U * 1024U)));
-    rlcd_text(20, 170, text, 2);
+    rlcd_text(20, 138, text, 2);
     snprintf(text, sizeof(text), "DISPLAY %u X %u", BOARD_RLCD_WIDTH, BOARD_RLCD_HEIGHT);
-    rlcd_text(20, 200, text, 2);
+    rlcd_text(20, 162, text, 2);
+    rlcd_text(20, 190, !m->battery.valid ? "BATTERY UNKNOWN" :
+              m->battery.detected ? "BATTERY DETECTED - EST" : "BATTERY NOT DETECTED - EST", 2);
+    if (m->battery.valid) {
+        snprintf(text, sizeof(text), "%u.%03u V",
+                 (unsigned)(m->battery.voltage_mv / 1000U),
+                 (unsigned)(m->battery.voltage_mv % 1000U));
+    } else {
+        snprintf(text, sizeof(text), "--.--- V");
+    }
+    rlcd_text(20, 214, text, 2);
+    if (m->battery.valid && m->battery.detected) {
+        snprintf(text, sizeof(text), "%u%% EST", m->battery.percent);
+    } else {
+        snprintf(text, sizeof(text), "--%% EST");
+    }
+    rlcd_text(220, 214, text, 2);
     snprintf(text, sizeof(text), "ESP-IDF %.44s", esp_get_idf_version());
     for (char *p = text; *p != '\0'; ++p) {
         *p = (char)toupper((unsigned char)*p);
