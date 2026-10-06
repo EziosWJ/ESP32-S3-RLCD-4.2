@@ -92,38 +92,28 @@ python tests/test_ha_state.py --zig <zig.exe路径>
 
 [统一 UI 生产预览](docs/ui-preview/index.html) 使用实际 UI、按键、解析器与绘图代码，覆盖正常/离线、连接中、长名称、四币种长金额、8 个账户及额度边界。[Codeck 状态预览](docs/codeck-live-preview/index.html) 保留认证、TLS、服务、版本、容量和缺失数据样例。旧版 [历史布局演示](docs/codeck-preview/index.html) 不代表当前固件，其演示模块已从固件构建中移除。
 
-#### 页面截图与状态说明
+主机端预览的生成命令、真实快照用法和实机验证范围见[预览流程说明](docs/ui-preview-workflow.md)。
 
-以下为生产 UI 在 **400 × 300 单色画布**上渲染的合成数据，不是实机照片或实时余额。全部时间为 UTC+8，主机测试不代替上板验收。
+#### 实机联网画面
 
-| Codex CLI 与剩余额度 | 每屏两个余额账户 |
+以下截图来自 COM9 上实际运行的设备，页面按屏幕原样保留。采集时设备已连接 Wi-Fi，传感器和 Codeck 数据均在线。
+
+| 环境与温湿度 | Codeck 额度（1/2） |
 | --- | --- |
-| ![Codex 5H、7Day 剩余额度与紧凑状态](docs/ui-preview/codex.png) | ![上下排列的余额卡片](docs/ui-preview/balances.png) |
+| ![实机环境与温湿度页面](docs/images/live-board/sensor.png) | ![实机 Codeck 额度页面](docs/images/live-board/codeck-quota.png) |
+| 本地及两个房间的温湿度；LIVE 表示数据正常更新。 | 显示服务状态、5 小时和 7 天剩余额度及重置时间。 |
 
-| 网络卡片 | 系统与电池卡片 |
+| Codeck 账户（2/2） | 网络（1/3） |
 | --- | --- |
-| ![Wi-Fi 连接、IP、RSSI 与配网入口](docs/ui-preview/network.png) | ![芯片、存储、电池及 UTC+8 日期](docs/ui-preview/system.png) |
+| ![实机 Codeck 账户余额页面](docs/images/live-board/codeck-balances.png) | ![实机 Wi-Fi 网络状态页面](docs/images/live-board/device-network.png) |
+| 显示已配置账户的余额和数据状态。 | 显示 Wi-Fi 连接、信号、设备 IP 和热点状态。 |
 
-- HEADER 固定显示时间、Wi-Fi 信号和估算电量；右侧的小序号表示当前内容屏。
-- 5H 与 7Day 的主数字及进度条表示剩余，RESET 为重置时间。
-- 内容区 SNAPSHOT/CACHED 表示快照生成时间，OBS 是额度观测时间，账户卡片底部是该账户的观测时间；三者分别保留。
-- 金额未知时显示 `--`。OLD 是账户陈旧；LAST KNOWN/CACHED 是请求失败后保留的整份快照，不显示成实时成功数据。
-- KEY 切顶层页面，BOOT 翻当前页面内容；仅网络/系统页长按 KEY 3 秒配网。
+| 设备信息（2/3） | 内存使用（3/3） |
+| --- | --- |
+| ![实机设备信息页面](docs/images/live-board/device-system.png) | ![实机内存使用页面](docs/images/live-board/device-memory.png) |
+| 显示芯片、屏幕、电池和日期信息。 | 显示固件、内部内存和 PSRAM 使用情况。 |
 
-```powershell
-# 公网 DNS / 证书链 / 主机名 / 实际 GET，以及一次无效凭据 GET；不输出 key。
-python tests/probe_codeck.py --check-auth
-# 生产 UI、双按键、时间转换集成测试，同时生成逐屏预览。
-python tests/test_ui.py --zig <zig.exe路径>
-# 生产解析器和模拟传输故障的客户端测试。
-python tests/test_codeck.py --zig <zig.exe路径>
-# 从真实绘图代码生成契约样例预览，检查文字、图形重叠和边界。
-python tests/preview_codeck_snapshot.py --zig <zig.exe路径>
-# 使用抓取的真实响应绘图；此预览保存到被忽略的 build/ 内。
-python tests/preview_codeck_snapshot.py --zig <zig.exe路径> --json build/codeck-live.json
-```
-
-此前网络主机验收：公网 DNS、TLS 1.3 证书链与主机名校验成功；有效凭据 GET 返回 200，最新响应 698 字节，生产解析器读出两个额度窗口和两条有观测的余额配置（DeepSeek / CNY、OpenRouter / USD）；无效凭据 GET 返回 401。多账户多币种由契约样例验证。69 个解析、金额、缓存和退避用例通过；实际 HTTP 客户端通过模拟成功、401、503、TLS 失败、断网、响应截断、超容量及 403，验证最后快照保留，含恰好 4 KiB 的合法响应边界。真实样例和所有故障页面通过绘图边界检查。凭据文件被忽略且未被跟踪，Git 可见文件凭据扫描通过。ESP-IDF 6.1 编译通过；**尚未烧录，板上 SNTP、HTTPS 和断网恢复需上板确认。**
+按 **KEY** 切换环境、Codeck 和设备页面；在 Codeck 或设备页面按 **BOOT** 查看下一屏。
 
 ### Wi-Fi 配网
 
