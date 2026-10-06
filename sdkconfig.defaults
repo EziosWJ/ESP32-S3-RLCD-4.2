@@ -17,3 +17,6 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# The setup API accepts a flat credentials object; bound the HTTP parser stack.
+CONFIG_CJSON_NESTING_LIMIT=8

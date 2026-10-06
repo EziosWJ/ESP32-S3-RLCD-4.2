@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RLCD Wi-Fi 配网</title>
+<style>
+  *{box-sizing:border-box}body{margin:0;background:#f3f5f7;color:#18232c;font:16px system-ui,sans-serif}
+  main{max-width:480px;margin:28px auto;padding:26px;background:white;border-radius:18px}
+  h1{margin:0 0 12px;font-size:26px}p{line-height:1.6;color:#465663}label{display:block;margin:20px 0 8px;font-weight:600}
+  input,select,button{font:inherit;width:100%;padding:13px;border:1px solid #aab6c0;border-radius:9px;background:white}
+  button{cursor:pointer;margin-top:14px;background:#155c48;color:white;border:0;font-weight:600}button.secondary{background:#e8f1ed;color:#155c48}
+  button:disabled{opacity:.55;cursor:wait}input:focus,select:focus,button:focus-visible{outline:3px solid #a1cfc0;outline-offset:2px}
+  #status{background:#eef5f1;padding:14px;border-radius:9px;overflow-wrap:anywhere}#status.error{background:#fff0ec;color:#8e3427}
+  .check{display:flex;gap:8px;align-items:center;font-weight:400;margin-top:12px}.check input{width:auto}.hint{font-size:14px}
+  footer{margin-top:24px;font-size:13px;color:#60717b}@media(max-width:520px){main{margin:16px;padding:22px}}
+</style>
+<main>
+  <h1>连接家庭 Wi-Fi</h1>
+  <p>为 RLCD 设备选择 <strong>2.4 GHz</strong> 网络。手机提示此热点无法上网时，请选择保持连接。</p>
+  <div id="status" role="status" aria-live="polite">正在读取设备状态…</div>
+  <form id="form">
+    <label for="networks">附近的 Wi-Fi</label>
+    <select id="networks"><option value="">请选择，或在下方手动输入</option></select>
+    <button id="scan" type="button" class="secondary">重新扫描</button>
+    <p id="scanHint" class="hint" aria-live="polite"></p>
+    <label for="ssid">Wi-Fi 名称（SSID）</label>
+    <input id="ssid" name="ssid" autocomplete="off" required placeholder="也可输入隐藏网络名称">
+    <label for="password">Wi-Fi 密码</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" maxlength="64" placeholder="开放网络请留空">
+    <label class="check"><input id="show" type="checkbox">显示密码</label>
+    <button id="connect" type="submit" disabled>连接并保存</button>
+  </form>
+  <footer>连接成功后会保存配置并关闭设备热点。更换网络时，长按设备 KEY 按键 3 秒即可重新配网。</footer>
+</main>
+<script>
+  const el=id=>document.getElementById(id);
+  const encoder=new TextEncoder();
+  let token='',working=false,done=false,lastNetworks='',polling=false;
+  const messages={
+    ready:'请选择 Wi-Fi 并输入密码。',
+    connecting:'正在连接 Wi-Fi，请稍候…连接过程中热点可能短暂中断，手机请保持连接。',
+    connected:'连接成功，配置已保存！设备热点即将关闭，手机可切回家庭 Wi-Fi。',
+    retrying:'正在自动重连，请稍候…',
+    failed:'连接失败，请检查 Wi-Fi 名称、密码和信号后重试。'
+  };
+  function say(message,error=false){el('status').textContent=message;el('status').classList.toggle('error',error)}
+  function buttons(busy){el('connect').disabled=busy||!token||done;el('scan').disabled=busy||!token||done}
+  async function fetchWithTimeout(path,options={}){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),8000);
+    try{return await fetch(path,{...options,signal:controller.signal})}finally{clearTimeout(timer)}
+  }
+  async function request(path,data){
+    const response=await fetchWithTimeout(path,{method:'POST',headers:{'Content-Type':'application/json','X-Setup-Token':token},body:JSON.stringify(data)});
+    if(!response.ok)throw new Error(response.status===409?'设备正在处理其他操作，请稍后重试。':'设备暂时无法处理请求，请稍后重试。');
+  }
+  async function poll(){
+    if(polling||done)return;
+    polling=true;
+    try{
+      const response=await fetchWithTimeout('/api/status',{cache:'no-store'});
+      if(!response.ok)throw new Error('status');
+      const data=await response.json();token=data.token;
+      working=data.state==='connecting';
+      done=data.state==='connected';
+      let message=messages[data.state]||'设备正在启动…';
+      if(done&&data.ip)message+=' IP：'+data.ip;
+      if(data.state==='failed'){
+        if(data.message.includes('Authentication'))message='认证失败，请检查 Wi-Fi 密码和路由器设置。';
+        if(data.message.includes('timed out'))message='连接超时，请检查信号、Wi-Fi 名称和密码。';
+        if(data.message.includes('save'))message='配置保存失败，请重试。';
+      }
+      say(message,data.state==='failed');
+      buttons(working);el('scan').disabled=working||data.scanning||done;
+      el('scanHint').textContent=data.scanning?'正在扫描附近网络…':data.scan_error?'扫描失败，可重试或手动输入名称。':data.networks.length?'列表仅显示 2.4 GHz 网络，也可手动输入。':'未发现网络，可重新扫描或手动输入。';
+      const signature=JSON.stringify(data.networks);
+      if(signature!==lastNetworks){
+        lastNetworks=signature;
+        const selected=el('networks').value;
+        el('networks').replaceChildren(new Option('请选择，或在下方手动输入',''));
+        for(const network of data.networks){
+          // Network names are untrusted text, never HTML.
+          el('networks').add(new Option(network.ssid+' ('+network.rssi+' dBm'+(network.secure?' · 加密':' · 开放')+')',network.ssid));
+        }
+        el('networks').value=selected;
+      }
+      if(done){el('password').value='';el('form').hidden=true}
+    }catch(error){
+      say(working?'正在尝试连接。若热点中断，请重新连接设备热点查看结果。':'设备暂时没有响应，请确认手机仍连接设备热点。',true);
+      // Submission may have reached the device even if its response was lost.
+      // Keep polling instead of inferring connection success from a network error.
+    }finally{polling=false}
+  }
+  el('networks').addEventListener('change',()=>{if(el('networks').value)el('ssid').value=el('networks').value});
+  el('show').addEventListener('change',()=>{el('password').type=el('show').checked?'text':'password'});
+  el('scan').addEventListener('click',async()=>{
+    el('scan').disabled=true;
+    try{await request('/api/scan',{});await poll()}catch(error){say(error.message,true);el('scan').disabled=working||!token}
+  });
+  el('form').addEventListener('submit',async event=>{
+    event.preventDefault();
+    const ssid=el('ssid').value,password=el('password').value;
+    if(!ssid||encoder.encode(ssid).length>32){say('Wi-Fi 名称须为 1–32 字节；中文通常占多个字节。',true);return}
+    if(password&&!(password.length>=8&&password.length<=63&&/^[\x20-\x7e]+$/.test(password))&&!/^[0-9a-fA-F]{64}$/.test(password)){
+      say('密码须为 8–63 个 ASCII 字符，或 64 位十六进制密钥；开放网络请留空。',true);return
+    }
+    working=true;buttons(true);say(messages.connecting);
+    try{await request('/api/connect',{ssid,password})}catch(error){say(error.message+' 正在确认设备状态…',true)}
+    await poll();
+  });
+  poll();setInterval(poll,2000);
+</script>
+</html>

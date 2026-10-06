@@ -24,3 +24,10 @@
 // Match the factory demo: subtract 4 C from the converted temperature.
 #define BOARD_TEMPERATURE_OFFSET_C (-4.0f)
 #define BOARD_SAMPLE_INTERVAL_MS 2000U
+
+// KEY: active-low GPIO 18, verified against the local factory button_bsp.c.
+#define BOARD_KEY_GPIO 18
+#define BOARD_WIFI_SETUP_HOLD_MS 3000U
+#define BOARD_WIFI_CONNECT_TIMEOUT_MS 30000U
+#define BOARD_WIFI_RETRY_INTERVAL_MS 5000U
+#define BOARD_WIFI_PORTAL_GRACE_MS 10000U
