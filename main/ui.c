@@ -10,6 +10,7 @@
 static ui_page_t current_page;
 static ui_model_t model;
 static bool dirty, setup_visible, portal_was_active;
+#define NETWORK_SCREEN_COUNT 3U
 static unsigned codeck_frame;
 static unsigned network_frame;
 static codeck_snapshot_t codeck, codeck_next;
@@ -64,7 +65,7 @@ void ui_scroll(void)
         codeck_frame = (codeck_frame + 1) % codeck_page_count(&codeck);
         dirty = true;
     } else if (current_page == PAGE_NETWORK) {
-        network_frame = (network_frame + 1) % 2;
+        network_frame = (network_frame + 1) % NETWORK_SCREEN_COUNT;
         dirty = true;
     }
 }
@@ -96,6 +97,15 @@ void ui_update_battery(const battery_reading_t *reading)
                          model.battery.percent != reading->percent;
     model.battery = *reading;
     if (changed) dirty = true;
+}
+
+void ui_update_memory_info(const ui_memory_info_t *memory)
+{
+    if (memory == NULL) return;
+    model.memory = *memory;
+    if (current_page == PAGE_NETWORK && network_frame == 2 && !setup_visible) {
+        dirty = true;
+    }
 }
 
 esp_err_t ui_render(void)
@@ -176,7 +186,7 @@ esp_err_t ui_render(void)
     const unsigned frame = setup_visible ? 0 : current_page == PAGE_CODECK ? codeck_frame :
                            current_page == PAGE_NETWORK ? network_frame : 0;
     const unsigned count = setup_visible ? 1 : current_page == PAGE_CODECK ? codeck_page_count(&codeck) :
-                           current_page == PAGE_NETWORK ? 2 : 1;
+                           current_page == PAGE_NETWORK ? NETWORK_SCREEN_COUNT : 1;
     ui_draw_header(title, &timed_header, frame, count);
     if (setup_visible) {
         draw_setup_page(&model);

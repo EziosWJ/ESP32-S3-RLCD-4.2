@@ -67,10 +67,88 @@ void draw_sensor_page(const ui_model_t *m)
     }
 }
 
+static unsigned usage_percent(size_t total, size_t free_bytes)
+{
+    if (total == 0) return 0;
+    if (free_bytes > total) free_bytes = total;
+    return (unsigned)(((total - free_bytes) * 100U + total / 2U) / total);
+}
+
+static void draw_usage_bar(int x, int y, int width, int height, unsigned percent)
+{
+    if (percent > 100) percent = 100;
+    rlcd_rect(x, y, width, height);
+    const int fill_width = (width - 4) * (int)percent / 100;
+    for (int row = y + 2; row < y + height - 2; ++row) {
+        rlcd_hline(x + 2, row, fill_width);
+    }
+}
+
+static void usage_card(int y, const char *title, bool valid, unsigned percent,
+                       const char *value, const char *detail)
+{
+    char text[16];
+    ui_draw_card(20, y, 360, 72);
+    rlcd_text(30, y + 5, title, 2);
+    if (valid) snprintf(text, sizeof(text), "%u%%", percent);
+    else snprintf(text, sizeof(text), "--%%");
+    rlcd_text(316, y + 5, text, 2);
+    rlcd_text(30, y + 24, value, 1);
+    draw_usage_bar(30, y + 37, 340, 10, valid ? percent : 0);
+    rlcd_text(30, y + 53, detail, 1);
+}
+
+static void draw_memory_page(const ui_model_t *m)
+{
+    char value[48], detail[48];
+    const ui_memory_info_t *memory = &m->memory;
+    const bool flash_valid = memory->app_image_bytes > 0 && memory->app_partition_bytes > 0;
+    const size_t app_image = memory->app_image_bytes;
+    const size_t app_partition = memory->app_partition_bytes;
+    unsigned flash_percent = flash_valid ? (unsigned)(app_image * 100U / app_partition) : 0;
+    if (flash_percent > 100) flash_percent = 100;
+    if (flash_valid) {
+        snprintf(value, sizeof(value), "IMAGE %u KB / SLOT %u KB",
+                 (unsigned)(app_image / 1024U), (unsigned)(app_partition / 1024U));
+        snprintf(detail, sizeof(detail), "APP SLOT FREE %u KB",
+                 (unsigned)((app_partition > app_image ? app_partition - app_image : 0) / 1024U));
+    } else {
+        snprintf(value, sizeof(value), "APP IMAGE UNAVAILABLE");
+        snprintf(detail, sizeof(detail), "PARTITION DATA UNAVAILABLE");
+    }
+    usage_card(61, "APP FLASH", flash_valid, flash_percent, value, detail);
+
+    const size_t internal_total = memory->internal_heap_total_bytes;
+    const size_t internal_free = memory->internal_heap_free_bytes;
+    const bool internal_valid = internal_total > 0;
+    const unsigned internal_percent = usage_percent(internal_total, internal_free);
+    snprintf(value, sizeof(value), "USED %u KB  FREE %u KB",
+             (unsigned)((internal_total > internal_free ? internal_total - internal_free : 0) / 1024U),
+             (unsigned)(internal_free / 1024U));
+    snprintf(detail, sizeof(detail), "LOW %u KB  MAX BLOCK %u KB",
+             (unsigned)(memory->internal_heap_min_free_bytes / 1024U),
+             (unsigned)(memory->internal_heap_largest_free_block / 1024U));
+    usage_card(137, "INTERNAL HEAP", internal_valid, internal_percent,
+               internal_valid ? value : "NOT AVAILABLE", internal_valid ? detail : "HEAP UNAVAILABLE");
+
+    const size_t psram_total = memory->psram_heap_total_bytes;
+    const size_t psram_free = memory->psram_heap_free_bytes;
+    const bool psram_valid = psram_total > 0;
+    const unsigned psram_percent = usage_percent(psram_total, psram_free);
+    snprintf(value, sizeof(value), "USED %u KB  FREE %u KB",
+             (unsigned)((psram_total > psram_free ? psram_total - psram_free : 0) / 1024U),
+             (unsigned)(psram_free / 1024U));
+    snprintf(detail, sizeof(detail), "LOW %u KB  MAX BLOCK %u KB",
+             (unsigned)(memory->psram_heap_min_free_bytes / 1024U),
+             (unsigned)(memory->psram_heap_largest_free_block / 1024U));
+    usage_card(213, "PSRAM HEAP", psram_valid, psram_percent,
+               psram_valid ? value : "NOT AVAILABLE", psram_valid ? detail : "PSRAM UNAVAILABLE");
+}
+
 void draw_network_page(const ui_model_t *m, unsigned screen)
 {
     char text[64];
-    if (screen % 2 == 0) {
+    if (screen == 0) {
         ui_draw_card(20, 64, 360, 140);
         ui_draw_icon(UI_ICON_WIFI, 30, 76);
         rlcd_text(52, 76, network_state(m), 2);
@@ -88,6 +166,10 @@ void draw_network_page(const ui_model_t *m, unsigned screen)
         rlcd_text(52, 229, m->wifi_available && m->wifi.portal_active ? "HOTSPOT ACTIVE" : "HOTSPOT OFF", 2);
         rlcd_text(30, 254, "HOLD KEY 3S TO SET UP WIFI", 2);
         rlcd_text(30, 280, "BOOT NEXT CARD SCREEN", 1);
+        return;
+    }
+    if (screen >= 2) {
+        draw_memory_page(m);
         return;
     }
     ui_draw_card(20, 64, 360, 102);

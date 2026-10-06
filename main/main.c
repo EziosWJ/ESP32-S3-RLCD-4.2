@@ -8,7 +8,10 @@
 #include "esp_chip_info.h"
 #include "esp_err.h"
 #include "esp_flash.h"
+#include "esp_heap_caps.h"
+#include "esp_image_format.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_psram.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -26,6 +29,36 @@
 
 static const char *TAG = "rlcd";
 
+static void read_app_image_size(ui_memory_info_t *memory)
+{
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    if (running == NULL) return;
+
+    const esp_partition_pos_t position = {
+        .offset = running->address,
+        .size = running->size,
+    };
+    esp_image_metadata_t metadata = {0};
+    if (esp_image_get_metadata(&position, &metadata) == ESP_OK) {
+        memory->app_image_bytes = metadata.image_len;
+        memory->app_partition_bytes = running->size;
+    }
+}
+
+static void update_heap_sizes(ui_memory_info_t *memory)
+{
+    const uint32_t internal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    const uint32_t psram = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    memory->internal_heap_total_bytes = heap_caps_get_total_size(internal);
+    memory->internal_heap_free_bytes = heap_caps_get_free_size(internal);
+    memory->internal_heap_min_free_bytes = heap_caps_get_minimum_free_size(internal);
+    memory->internal_heap_largest_free_block = heap_caps_get_largest_free_block(internal);
+    memory->psram_heap_total_bytes = heap_caps_get_total_size(psram);
+    memory->psram_heap_free_bytes = heap_caps_get_free_size(psram);
+    memory->psram_heap_min_free_bytes = heap_caps_get_minimum_free_size(psram);
+    memory->psram_heap_largest_free_block = heap_caps_get_largest_free_block(psram);
+}
+
 void app_main(void)
 {
     esp_chip_info_t chip_info;
@@ -33,6 +66,8 @@ void app_main(void)
 
     esp_chip_info(&chip_info);
     ESP_ERROR_CHECK(esp_flash_get_size(NULL, &flash_size));
+    ui_memory_info_t memory = {0};
+    read_app_image_size(&memory);
 
     ESP_LOGI(TAG, "Board: %s", BOARD_NAME);
     ESP_LOGI(TAG, "ESP-IDF: %s", esp_get_idf_version());
@@ -92,7 +127,11 @@ void app_main(void)
     ESP_LOGI(TAG, "Display: %u x %u landscape, sample interval: %u ms",
              BOARD_RLCD_WIDTH, BOARD_RLCD_HEIGHT, BOARD_SAMPLE_INTERVAL_MS);
 
+    update_heap_sizes(&memory);
+    ui_update_memory_info(&memory);
+
     int64_t next_sample = esp_timer_get_time() / 1000;
+    int64_t next_memory_sample = next_sample + 30000;
     TickType_t last_wake = xTaskGetTickCount();
     while (true) {
         const button_event_t event = button_poll();
@@ -106,6 +145,11 @@ void app_main(void)
             }
         }
         const int64_t now = esp_timer_get_time() / 1000;
+        if (now >= next_memory_sample) {
+            update_heap_sizes(&memory);
+            ui_update_memory_info(&memory);
+            next_memory_sample = now + 30000;
+        }
         if (now >= next_sample) {
             battery_reading_t battery = {0};
             if (battery_available) {

@@ -14,6 +14,7 @@ typedef struct {
     wifi_setup_status_t wifi;
     ha_snapshot_t ha;
     ui_system_info_t system;
+    ui_memory_info_t memory;
     clock_display_t clock;
     battery_reading_t battery;
 } ui_model_t;
