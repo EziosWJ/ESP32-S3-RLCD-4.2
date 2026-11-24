@@ -38,8 +38,10 @@
 - HA 地址在 `main/board_config.h` 的 `BOARD_HA_URL`，由本地配置指定。ESP32 应连接到可访问该地址的家庭局域网。
 - 将长期访问令牌单独放在项目根目录 `rc.key`，无需添加 `Bearer` 或引号；支持末尾换行及 UTF-8 BOM。构建时嵌入固件，所有请求添加 `Authorization: Bearer <token>`，协议依据 [HA REST API 文档](https://developers.home-assistant.io/docs/api/rest/)。令牌不输出到日志，`rc.key` 已被 Git 忽略；构建产物包含令牌，应作为私有文件保存。修改令牌后须重新构建并烧录；首次添加或删除文件时先运行 `idf.py reconfigure`。
 - 没有 `rc.key` 也可编译，此时 HA 实体显示 `NO TOKEN`，本机传感器正常工作。
-- 独立后台任务逐个 GET 四个温湿度实体和七个 Host Monitor 实体，地址为 `http://<home-assistant-host>:8123/api/states/<entity_id>`，完成一轮后等待 **15 秒**，单次 HTTP 操作超时 **4 秒**，响应限制为 4095 字节；请求使用 `Authorization: Bearer <token>`，读取 `state` 和 `attributes.unit_of_measurement`；不读取整个实体列表，不执行空调控制。轮询间隔、超时和过期时间均在 `main/board_config.h`。
-- `unknown`、`unavailable` 或无效数值显示占位符；401/403 显示 `AUTH ERROR`，404 显示 `NOT FOUND`，网络或响应读取异常显示 `READ ERROR`。断网立即隐藏 HA 当前值，超过 **45 秒**未成功读取的数据显示 `STALE`。每个实体独立更新，单项失败不影响其余读数。连接恢复后自动读取。
+- 后台任务每 **60 秒**完成一轮读取，单次 HTTP 操作超时 **8 秒**，响应限制为 4095 字节；轮询间隔、超时和过期时间均在 `main/board_config.h`。11 个实体（四个温湿度 + 七个 Host Monitor）优先合并为每轮一次 `POST /api/template`：请求体携带一段 Jinja 模板，服务端渲染出一个 JSON 对象，每个条目为 `{"s": "<状态>", "u": "<单位>"}`；HTTP 外层响应是 `{"result": "<渲染后的 JSON 字符串>"}` 的 JSON 套 JSON，固件先解出 `result` 字符串再解析内层对象。模板接口需要管理员权限；请求使用 `Authorization: Bearer <token>`，不读取整个实体列表，不执行空调控制。
+- `/api/template` 返回 401/403/404/405/501 时判定模板不可用，本轮退化为同一 keep-alive 连接上对 11 个实体的串行 `GET /api/states/<entity_id>`（整轮复用一条 TCP 连接）；退化期间每 10 轮重新试探一次模板接口，恢复成功后回到批量路径。模板不可用不等于令牌无效，最终认证状态由后续 GET 响应判定。
+- 每轮只提交一次快照：整轮解析完成后 `xQueueOverwrite` 一次，UI 一轮最多整屏刷新一次，不再按实体逐条覆盖。整轮传输失败时保留上一轮旧值，整体标记一次 `READ ERROR`，不丢弃半轮数据；模板/解析失败的条目标记 `OFFLINE`。`unknown`、`unavailable` 或无效数值显示占位符；401/403 显示 `AUTH ERROR`，404 显示 `NOT FOUND`，网络或响应读取异常显示 `READ ERROR`。断网立即隐藏 HA 当前值，超过 **180 秒**未成功读取的数据显示 `STALE`。连接恢复后自动读取。
+- 稳态网络开销：批量路径下每轮一条 TCP，约 **1–2 条 TCP/分钟**（旧版逐实体 GET 为约 44 次/分钟）；退化路径一轮仍复用一条 keep-alive 连接。
 - UI 只读取任务快照，所有屏幕绘制仍在主任务中；本机 SHTC3 保持每 2 秒采样，按键轮询保持 20 ms。
 
 解析器回归测试编译实际 `main/ha_state.c` 与项目的 cJSON，覆盖正常值、独立湿度范围、非数值、离线状态、溢出、实体不匹配、截断和多余 JSON：
@@ -67,13 +69,20 @@ python tests/test_ha_state.py --zig <zig.exe路径>
 
 ### 系统页电池信息
 
-网络/系统页的电池卡片显示电压（V）、估算百分比和按电压推测的检测状态；所有 HEADER 同时显示估算电量。沿用本地出厂示例的 ADC1 通道 3（GPIO 4）、12 dB 衰减、12 位采样和 3 倍分压还原，使用 ESP-IDF 曲线拟合校准；每 2 秒读取 16 次取平均，与温湿度采样共用主任务周期。电池初始化或采样失败显示 `READING UNKNOWN` 和占位符，HEADER 显示 `--%`，不影响其他页面。
+网络/系统页的电池卡片显示电压（V）、估算百分比和按电压推测的检测状态；所有 HEADER 同时显示电量状态。沿用本地出厂示例的 ADC1 通道 3（GPIO 4）、12 dB 衰减、12 位采样和 3 倍分压还原，使用 ESP-IDF 曲线拟合校准；每 2 秒读取 16 次取平均，与温湿度采样共用主任务周期。电池初始化或采样失败显示 `READING UNKNOWN` 和占位符，HEADER 显示 `--%`，不影响其他页面。
 
-电量沿用出厂示例：3.0～4.12 V 线性换算为 0～100%，上下限截断，显示 `EST` 标明估算。它并非电量计，充电和负载会影响百分比。
+**电量估算（OCV 查表 + 插值）**：固件内置 11 点开路电压（OCV）表，3.30 V → 0% … 4.20 V → 100%，段内线性插值、半取整，低于 3.30 V 截断为 0%、高于 4.20 V 截断为 100%。它并非电量计，充电和负载都会抬高端电压，因此百分比只在静置（非充电）状态下作为可信估算。
 
-**是否插入电池目前仅按电压推测，并非独立插入检测信号。** 默认电压达到 2.0 V 时显示检测到电池，低于阈值显示未检测到，后者隐藏百分比、保留采样电压。USB 供电时空电池座可能出现残余或充电电压，极低电压的电池也可能被判为未检测到；尚未确认原理图及实机空电池座读数，因此不能保证物理插入状态准确。阈值、分压比及电量端点集中在 `main/board_config.h` 的 `BOARD_BATTERY_*`。
+- **静息窗口与平滑**：以最近 60 秒内“静置、非充电”样本的最低电压作为查表输入；已发布百分比带 ±3% 滞回（进出滞回带才允许变动），且限速 ≤2%/分钟。首次有效样本直接发布，不受滞回和限速约束。
+- **充电判定**：满足其一即判为充电：端电压 ≥4.15 V；或在 5 分钟（300 秒）窗口内，较**窗口内最低样本**上升 ≥40 mV。上升判定以窗口内最低样本为锚点，锚点随新的更低样本刷新，超窗后从当前样本重新起算。充电期间 `percent_valid` 为假，不承诺百分比，HEADER/卡片显示 `CHG`，旧百分比仅作无效保留。
+- **满电判定**：非充电状态下，端电压 ≥4.05 V 并持续静置 10 分钟判为 `FULL`，显示 `100%`；之后端电压跌破 4.00 V 才退出满电。
+- **插入判定**：纯电压推断，无独立插入检测信号。打包电压在 2.50–4.40 V 窗口内判为已检测；窗口外判未检测，隐藏百分比、保留采样电压。USB 供电时空电池座可能出现残余或充电电压，极低电压电池也可能被判为未检测到；尚未确认原理图及实机空电池座读数，不能保证物理插入状态准确。
+- **分压标定**：还原公式为 `pack_mV = pin_mV × RATIO_MILLI / 1000 + OFFSET_MV`，比例与偏移由 `BOARD_BATTERY_DIVIDER_RATIO_MILLI`、`BOARD_BATTERY_MV_OFFSET` 两个常量给出。标定步骤：装好电池用万用表测量电池两端实际电压，对照固件显示的电压；按差值调整比例或偏移常量后重新编译烧录。其余阈值（检测窗口、充电/满电门限、滞回、限速、窗口长度）集中在 `main/board_config.h` 的 `BOARD_BATTERY_*`。
+- **显示侧语义**：电压先按 10 mV 步长量化再比较；新候选需稳定 200 ms 才提交到显示。退化转换（读数丢失、电池掉出窗口、百分比失效、状态回到 `UNKNOWN`）立即提交，不等去抖窗口。HEADER/卡片语义：放电且估算可信显示 `NN%`（系统页带 `EST`）；充电显示 `CHG`；满电显示 `100%`；其余（未知/未检测/估算不可信）显示 `--%`。
 
-上板验收：USB 供电且不装电池时记录电压和检测状态；安装电池后用万用表比较显示电压；确认系统页每 2 秒更新、KEY 切页正常。若空电池座读数与装电池读数重叠，单靠该 ADC 无法可靠判定插入，需要独立硬件检测信号。
+OCV 表与滞回、限速、门限判定在 `tests/test_battery_soc.py` 中有逐点镜像回归；主机测试输出 3.20–4.25 V 每 10 mV 的映射表。
+
+**实机充电行为（充电/满电判定、`CHG`/`100%`/`--%` 显示、标定后电压精度）尚未上板验证。** 上板验收：USB 供电且不装电池时记录电压和检测状态；安装电池后用万用表比较显示电压；确认系统页每 2 秒更新、KEY 切页正常；接充电器观察 `CHG` 与满电显示是否符合预期。若空电池座读数与装电池读数重叠，单靠该 ADC 无法可靠判定插入，需要独立硬件检测信号。
 
 ### Codeck 实时快照
 
@@ -81,7 +90,9 @@ python tests/test_ha_state.py --zig <zig.exe路径>
 
 **凭据配置**：将设备访问凭据原文保存到根目录 `codeck.key`，不用添加 `Bearer`、引号或 JSON；支持 UTF-8 BOM 和末尾换行。此文件已加入 Git 忽略，与 HA 的 `rc.key` 独立。CMake 构建时将其嵌入固件，首次创建或删除文件后执行 `idf.py reconfigure`，更换凭据后重新构建和烧录。缺失或无效文件时页面显示 `NO DEVICE KEY`，不发送请求。日志只记录固定状态码，HTTP 客户端的头部调试日志被抑制。**构建产物含凭据，应私有保存；当前不是加密 NVS 或在线凭据配置方案。**
 
-**TLS 与轮询**：等待 SNTP 成功校时之后才发起 HTTPS，使用 ESP-IDF `esp_crt_bundle_attach` 与完整 Mozilla 根证书 bundle，验证证书链、主机名和有效期，不固定叶证书、不关闭验证。成功后每 45 秒拉取一次；TLS、DNS、网络错误和连接超时依次退避约 10、20、40、60 秒，之后保持 60 秒，再加 0–10% 随机抖动。503、403、解析、容量及版本错误仍退避至最多约 5 分钟。401 最快 15 分钟重试一次，Wi-Fi 重连不会绕过认证冷却。各错误分别显示独立状态。
+**TLS 与轮询**：等待 SNTP 成功校时之后才发起 HTTPS，使用 ESP-IDF `esp_crt_bundle_attach` 与完整 Mozilla 根证书 bundle，每次请求仍完整验证证书链、主机名和有效期，不固定叶证书、不关闭验证。成功后每 **300 秒**拉取一次；TLS、DNS、网络错误和连接超时依次退避约 10、20、40、60 秒，之后保持 60 秒，再加 0–10% 随机抖动。503、403、解析、容量及版本错误仍退避至最多约 5 分钟。401 最快 15 分钟重试一次，Wi-Fi 重连不会绕过认证冷却。各错误分别显示独立状态。
+
+**页面可见门控**：只有停留在 CODECK 页面时后台任务才发起请求；切到其他页面后隐藏期间 **0 个请求、0 次 TLS 握手**，也不排队 Wi-Fi 恢复，RAM 中保留最后成功快照，下次回到页面立即重新请求（401 冷却仍生效）。每次请求结束都销毁 HTTP/TLS 客户端、下次重建连接，刻意不做连接复用：这是面向省电的取舍（缩短联网/射频活跃时间），不以复用连接降低延迟为目标。
 
 **自动恢复**：每次请求结束都销毁 HTTP/TLS 客户端，下次重建连接。Wi-Fi 或校时门控恢复后立即尝试读取，不再等待旧网络错误的退避计时。连续 3 次可恢复的传输失败时，请求网络工作线程重连已保存的 Wi-Fi；该恢复最多每 5 分钟一次，配网期间、测试新 Wi-Fi 配置期间不执行。明确的证书校验错误、401、403、503、数据解析错误不会触发 Wi-Fi 重连。Wi-Fi 恢复会短暂影响 HA 请求，已知数据仍保留。页面右上角显示 `CONNECTING` 或 `RETRY <秒数>S`，串口记录失败次数、下次重试间隔、排队恢复及成功恢复。真正的证书或公网不可达问题仍需修复网络或信任配置，重试不跳过 TLS 校验。
 
@@ -99,6 +110,19 @@ python tests/test_ha_state.py --zig <zig.exe路径>
 - 初始响应容量为 4 KiB（另加一个终止字节），完整接收后才解析，不静默截断。模型最多保存 8 条配置、每条 4 个币种；金额字符串最多 63 字节，名称最多 127 UTF-8 字节，平台最多 31 字节，币种代码最多 7 字节。超出模型或响应容量时整次更新失败并保留上次快照，不丢弃部分配置。
 
 主要文件：`main/codeck_client.c/.h`（凭据、HTTPS、后台轮询）、`main/codeck_state.c/.h`（契约解析、精确金额格式化、失败状态和退避）、`main/codeck_page.c/.h`（真实分页绘图）、`main/codeck_label.c/.h` 与 `assets/fonts/`（中文配置名点阵）；`main/ui.c`、`main/main.c`、`main/clock_service.c/.h`、`main/board_config.h`、`main/CMakeLists.txt` 和 `sdkconfig.defaults` 完成入口、线程安全校时门控、URL、凭据嵌入和证书配置。
+
+### 电源管理（PM / DFS / 轻睡）
+
+固件在 `main/power.c` 集中配置电源管理，初始化时机为 Wi-Fi、传感器、显示、电池等子系统就绪之后、主循环之前；配置失败只告警不阻断启动。
+
+- **PM 框架与轻睡**：开启 `CONFIG_PM_ENABLE` 与 FreeRTOS tickless idle，启用自动 light sleep（空闲时进入轻睡，事件/任务到期唤醒）。`esp_pm_configure()` 的频率窗口为 **80/40 MHz**：上限 80 MHz 与 `CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ` 一致，下限 40 MHz；CPU 按负载在窗口内 DFS 调频。电池 ADC 采样期间持有 `ESP_PM_APB_FREQ_MAX` 锁，避免采样过程中 APB 频率下跌影响读数。
+- **Wi-Fi 省电与发射功率**：Wi-Fi 设为 `WIFI_PS_MAX_MODEM`（最大调制解调省电）；最大发射功率上限设为 **60**（单位 0.25 dBm，即 15 dBm），属于近距离室内板卡的保守取值。若现场 RSSI 弱或请求丢包，可在 `main/power.c` 的 `POWER_WIFI_MAX_TX_POWER_Q6` 向上调回（映射：66→16 dBm、72→18 dBm、80→20 dBm，即 PHY 上限）；反之要进一步省发射电流可继续下调。
+- **USB Serial/JTAG 取舍**：USJ 在 light sleep 下无法工作，SDK 内置 `CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION` 守卫：USB 主机附着时自动保持 PM 轻睡锁。固件另有一个 10 秒周期的 USB 探测任务，附着时关闭 light sleep（保证串口监视器和烧录可用），拔出后重新开启；状态翻转时记录一条日志。烧录路径不受影响：ROM 下载模式由引导 ROM 处理，不依赖应用期的 light sleep 策略；探测任务在应用启动后才运行。
+- **启动证据日志**：PM 配置完成后回读实际生效参数，输出 `PM active: CPU 80/40 MHz, light sleep ON|OFF, USB probe: connected|not connected`；后续 USB 附着/拔出翻转也有对应日志。
+- **日志级别**：默认 `CONFIG_LOG_DEFAULT_LEVEL_WARN`，编译期最大级别保留到 `CONFIG_LOG_MAXIMUM_LEVEL_INFO`；运行时可用 `esp_log_level_set("<标签>", ESP_LOG_INFO)` 按标签临时上调，无需重新编译。串口监视器侧也可按过滤器收敛输出。
+- **配置生效方式**：上述项写在 `sdkconfig.defaults`。已有 `sdkconfig` 不会被 defaults 自动覆盖；要让本轮 PM/频率配置全量生效，需删除 `sdkconfig`、`sdkconfig.old` 和 `build/` 后由 defaults 重新生成，并在 `build/config/sdkconfig.h` 中逐项核对。
+- **40 MHz 下限依据**：ESP32-S3 的 DFS 低档在该 XTAL 档位下可取 40 MHz；PSRAM 和 Flash 的时钟频率项（Octal PSRAM 80 MHz、QSPI Flash 80 MHz）独立于 CPU 频率，不随 DFS 下限下调。
+- **未实测项**：light sleep 下的实际工作电流、续航时长尚未上板实测；省电效果需电流表/功耗计配合烧录后验证。
 
 官方图标库为 `main/brand_icons.c/.h` / `brand_icons_data.h`，包含 24、32、48 px 三种大小，共 1,464 字节；[图标图库](brand-icons/index.html) 提供原始资源与来源。配置名字体为 GNU Unifont 的 16 px 点阵子集，约 900 KiB，只驻留 Flash，不在设备上加载为同等大小的 RAM 图片，许可证随资源保留。
 
@@ -263,10 +287,11 @@ RLCD/
 
 ### 默认构建配置
 
-- CPU：240 MHz。
+- CPU：上限 **80 MHz**，DFS 窗口 80/40 MHz；开启 `CONFIG_PM_ENABLE`、FreeRTOS tickless idle 与自动 light sleep；USB Serial/JTAG 附着期间由内置守卫暂停 light sleep。
 - Flash：16 MB，QIO，80 MHz。
 - PSRAM：Octal，80 MHz，上电初始化，加入 `malloc` 可用堆。
 - 控制台：USB Serial/JTAG。
+- 日志：默认 WARN，编译期最大级别 INFO，运行时可按标签上调。
 - 分区：NVS `0x9000` / `0x6000`，PHY `0xF000` / `0x1000`，factory `0x10000` / 4 MB。剩余 Flash 暂未分配；当前不包含 OTA 和文件系统分区。
 
 ## 编译、烧录与日志
@@ -317,6 +342,10 @@ node tests/test_wifi_portal.js
 上板验收依次检查：首次启动热点及屏幕提示 → 手机扫描和正确密码配网 → 热点关闭 → 断电重启自动连接 → 关闭路由器后自动重连 → KEY 长按重新配网 → 错误密码和隐藏网络 → 配网期间温湿度持续刷新。自动弹窗需分别在实际 Android/iOS 手机上验证。
 
 ## 验证记录
+
+- 电池/网络批量化/电源管理版本（2026-11-24，分支 `feat/battery-power`）：删除旧 `sdkconfig`/`build/` 后由 `sdkconfig.defaults` 全量重新生成，ESP-IDF 6.1.0 + Xtensa GCC 15.2.0 `idf.py build` 通过，**编译错误 0、编译器警告 0**；日志中 5 条 CMake 警告为 SDK 内部 `esp_wifi`/`wpa_supplicant` 私有头目录校验提示，属既有 SDK 提示，非本轮引入。`idf.py size`：应用镜像 `rlcd.bin` 0x1fe710 字节（2,082,576），4 MB 应用分区剩余 50%；镜像总计 2,090,645 字节，DIRAM 142,131 / 341,760 字节（41.59%），IRAM 16,384 / 16,384。已核对 `build/config/sdkconfig.h` 实际落地：`CONFIG_PM_ENABLE=1`、`CONFIG_FREERTOS_USE_TICKLESS_IDLE=1`、`CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=80`（无 240 选项）、`CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=1`、`CONFIG_LOG_DEFAULT_LEVEL_WARN=1`、`CONFIG_LOG_MAXIMUM_LEVEL_INFO=1`、`CONFIG_SPIRAM_SPEED_80M=1`、证书 bundle 交叉签名校验开启。
+  - 主机测试：`tests/test_battery_soc.py` 通过（含 3.20–4.25 V 每 10 mV 映射表输出）；`tests/test_wifi_portal.js` 通过（Node v22.23.2）。`tests/test_portal_codec.py`、`tests/test_ha_state.py`、`tests/test_codeck.py`、`tests/test_ui.py` **未运行**：本机缺少 zig / clang 的 x86 主机编译器（仅有面向 Xtensa 的 esp-clang，无主机后端）；上述 Python 文件 `py_compile` 语法检查通过。
+  - **未烧录、未上板**：充电/满电判定与 `CHG`/`100%`/`--%` 显示、light sleep 实际工作电流与续航、HA 批量路径实际 TCP 计数、USB 附着/拔出时的 PM 翻转行为，均需上板后确认。
 
 - 统一 UI 版本（2026-10-06）：生产 UI 集成测试与双按键消抖测试通过；25 张预览通过字形、边界和文字/图形重叠检查，包含两行中文、四币种长金额、8 账户、未知数据和额度边界。69 个 Codeck 状态用例及模拟传输回归、40 个 HA 解析用例通过；ESP-IDF 6.1 构建通过。尚未烧录，实机 BOOT、RSSI、电池和屏幕效果待验证。规格见 [本地文档](specs/unified-ui-and-manual-navigation.md) 和 [Issue #1](https://github.com/EziosWJ/ESP32-S3-RLCD-4.2/issues/1)。
 

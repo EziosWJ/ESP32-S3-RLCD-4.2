@@ -112,7 +112,7 @@ def main():
         fail(C.byref(last),status)
         assert last.status==status and last.has_snapshot and old==(bytes(last.generated),bytes(last.windows),bytes(last.accounts),last.received)
         count+=1
-    assert retry(0,20,123)==45000 and retry(4,20,123)==900000
+    assert retry(0,20,123)==300000 and retry(4,20,123)==900000
     delays=[retry(7,n,0) for n in range(1,10)]
     assert delays==[10000,20000,40000,60000,60000,60000,60000,60000,60000]
     for status in [7,8,12,13]: assert 60000<=retry(status,32,0xffffffff)<=66000

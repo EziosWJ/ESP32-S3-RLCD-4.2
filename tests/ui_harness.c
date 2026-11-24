@@ -9,6 +9,7 @@
 #include "codeck_client.h"
 #include "codeck_label.h"
 #include "display_time.h"
+#include "board_config.h"
 #include "driver/gpio.h"
 
 static wifi_setup_status_t wifi;
@@ -19,8 +20,10 @@ static int64_t tick_ms;
 static int levels[2] = {1, 1}, flushes, fail_flush;
 static bool checking;
 static char visible[8192];
+static bool codeck_visible_last;
 
 int64_t esp_timer_get_time(void) { return tick_ms * 1000; }
+void codeck_client_set_visible(bool visible) { codeck_visible_last = visible; }
 esp_err_t gpio_config(const gpio_config_t *config)
 {
     assert(config->pin_bit_mask == ((1ULL << 18) | 1));
@@ -107,12 +110,24 @@ static void test_ui(void)
     const ui_system_info_t system = {16U*1024*1024,8U*1024*1024,2};
     ui_init(true, &system);
     ui_update_measurement(true, 25, 60, "LIVE");
-    const battery_reading_t battery = {.valid=true,.detected=true,.voltage_mv=3800,.percent=71};
+    battery_reading_t battery = {.valid=true,.detected=true,.percent_valid=true,
+                                 .power_state=BATTERY_POWER_DISCHARGING,
+                                 .voltage_mv=3800,.percent=71};
     ui_update_battery(&battery);
     expect("SENSOR"); expect("71%");
     int n = flushes; assert(ui_render() == ESP_OK && flushes == n);
+    // +1 mV stays inside the 10 mV quantization step: no redraw.
+    battery.voltage_mv = 3801; ui_update_battery(&battery);
+    assert(ui_render() == ESP_OK && flushes == n);
+    // A full 10 mV step is a candidate, but it has not settled for 200 ms yet.
+    battery.voltage_mv = 3810; ui_update_battery(&battery);
+    assert(ui_render() == ESP_OK && flushes == n);
+    // Stable through the debounce window: exactly one more flush.
+    tick_ms += BOARD_BATTERY_DISPLAY_DEBOUNCE_MS;
+    assert(ui_render() == ESP_OK && flushes == n + 1);
     event(BUTTON_BOOT_SHORT_PRESS); expect("SENSOR"); assert(!ui_handle_button(BUTTON_LONG_PRESS));
     event(BUTTON_SHORT_PRESS); expect("CODECK"); expect("5H"); expect("1/3");
+    assert(codeck_visible_last);
     event(BUTTON_BOOT_SHORT_PRESS); expect("2/3"); expect("DEEPSEEK");
     tick_ms += 13000; expect("2/3");
     event(BUTTON_SHORT_PRESS); expect("DEVICE"); assert(ui_handle_button(BUTTON_LONG_PRESS));
@@ -138,6 +153,26 @@ static void test_ui(void)
     event(BUTTON_SHORT_PRESS); expect("WAITING FOR SNTP"); expect("--");
     wifi.portal_active = true; wifi.state = WIFI_SETUP_READY; expect("WIFI SETUP");
     event(BUTTON_SHORT_PRESS); expect("CODECK");
+    // Leave the Codeck page before the battery-state checks.
+    event(BUTTON_SHORT_PRESS); expect("DEVICE"); assert(!codeck_visible_last);
+    // Charging: "CHG", the percent estimate stays hidden.
+    battery.power_state = BATTERY_POWER_CHARGING;
+    battery.percent_valid = false;
+    ui_update_battery(&battery);
+    tick_ms += BOARD_BATTERY_DISPLAY_DEBOUNCE_MS;
+    expect("CHG");
+    assert(!strstr(visible, "71%"));
+    // Full: "100%".
+    battery.power_state = BATTERY_POWER_FULL;
+    battery.percent_valid = true;
+    battery.percent = 100;
+    ui_update_battery(&battery);
+    tick_ms += BOARD_BATTERY_DISPLAY_DEBOUNCE_MS;
+    expect("100%");
+    // Pack dropped: a degradation commits immediately, "--%".
+    battery.detected = false;
+    ui_update_battery(&battery);
+    expect("--%");
     puts("UI integration: navigation, retained positions, update clamp, header refresh, provisioning, retry and dual-button debounce passed.");
 }
 
@@ -161,7 +196,9 @@ int main(int argc, char **argv)
         const ui_system_info_t system = {16U*1024*1024,8U*1024*1024,2};
         ui_init(true, &system); ui_set_page((ui_page_t)page);
         ui_update_measurement(true,-49,100,"LIVE");
-        battery_reading_t battery = {.valid=true,.detected=true,.percent=85,.voltage_mv=3800};
+        battery_reading_t battery = {.valid=true,.detected=true,.percent_valid=true,
+                                     .power_state=BATTERY_POWER_DISCHARGING,
+                                     .percent=85,.voltage_mv=3800};
         if (scenario == 1) { wifi.state = WIFI_SETUP_RETRYING; wifi.signal_valid = false; clock_value.valid = false; battery.valid = false; }
         if (scenario == 2) wifi.rssi = -85;
         if (scenario == 3) wifi.signal_valid = false;
@@ -169,13 +206,16 @@ int main(int argc, char **argv)
         if (scenario == 5) { wifi.state = WIFI_SETUP_READY; wifi.portal_active = true; }
         if (scenario == 6) { snapshot.fetching = true; snapshot.retry_seconds = 4294967295U; }
         if (scenario == 7) wifi.state = WIFI_SETUP_CONNECTING;
+        if (scenario == 8) { battery.power_state = BATTERY_POWER_CHARGING; battery.percent_valid = false; battery.percent = 28; }
+        if (scenario == 9) { battery.power_state = BATTERY_POWER_FULL; battery.percent_valid = true; battery.percent = 100; }
         ui_update_battery(&battery);
         // Fetch data before calculating BOOT navigation, exactly as the device does.
         checking = true; assert(ui_render() == ESP_OK);
         for (int i = 0; i < screen; ++i) event(BUTTON_BOOT_SHORT_PRESS);
         checking = false;
         // Force a production redraw without replacing the chosen navigation state.
-        battery.voltage_mv++; ui_update_battery(&battery); assert(ui_render() == ESP_OK);
+        strcpy(clock_value.time, "14:21:00");
+        assert(ui_render() == ESP_OK);
     }
     free(font); return 0;
 }

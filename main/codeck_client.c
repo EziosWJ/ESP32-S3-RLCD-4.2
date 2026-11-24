@@ -17,6 +17,9 @@
 static QueueHandle_t snapshots;
 static char authorization[520];
 static const char *TAG = "codeck";
+// Page visibility gate: set by the UI when the CODECK page is shown/hidden.
+// While hidden the worker must not open a request, TLS session or Wi-Fi recovery.
+static volatile bool page_visible = false;
 
 static bool load_key(void)
 {
@@ -171,6 +174,16 @@ static void worker(void *arg)
     }
     recovery_t recovery={0};
     while (true) {
+        if (!page_visible) {
+            // Hidden page: keep the last snapshot. Do not fetch, do not bring up
+            // TLS, and do not queue Wi-Fi recovery. Re-arm the ready flag so the
+            // next time the page shows, a snapshot is requested at once (the
+            // 401 cooldown in poll_ready still applies).
+            recovery.was_ready = false;
+            last->fetching = false;
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
         wifi_setup_status_t wifi; wifi_setup_get_status(&wifi);
         codeck_status_t gate = wifi.state!=WIFI_SETUP_CONNECTED ? CODECK_WAIT_NETWORK :
                                !clock_service_is_synchronized() ? CODECK_WAIT_TIME : CODECK_OK;
@@ -238,4 +251,9 @@ void codeck_client_get_snapshot(codeck_snapshot_t *snapshot)
         // operation is still waiting for its socket timeout.
         if(wifi.state!=WIFI_SETUP_CONNECTED) snapshot->status=CODECK_WAIT_NETWORK;
     }
+}
+
+void codeck_client_set_visible(bool visible)
+{
+    page_visible = visible;
 }

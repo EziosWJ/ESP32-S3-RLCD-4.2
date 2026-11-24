@@ -53,7 +53,8 @@ int gpio_get_level(int pin);
     cases = [('sensor',0,0,0,0), ('codex',1,0,0,0), ('balances',1,1,0,0), ('balances-last',1,2,0,0),
              ('network',2,0,0,0), ('system',2,1,0,0), ('offline',2,0,1,0), ('system-unknown',2,1,1,0),
              ('weak-wifi',1,0,2,0), ('unknown-signal',1,0,3,0), ('no-snapshot',1,0,4,1),
-             ('setup',0,0,5,0), ('cached',1,1,0,4), ('connecting',1,0,6,0), ('wifi-connecting',2,0,7,0)]
+             ('setup',0,0,5,0), ('cached',1,1,0,4), ('connecting',1,0,6,0), ('wifi-connecting',2,0,7,0),
+             ('charging',2,1,8,0), ('full',2,1,9,0)]
     extreme = copy.deepcopy(data)
     extreme['balances']['items'] = [copy.deepcopy(data['balances']['items'][0]) for _ in range(8)]
     for account in extreme['balances']['items']:
@@ -109,6 +110,14 @@ int gpio_get_level(int pin);
             assert 'CNY -12346.00' in visible and 'USD 0.00' in visible
         if name == 'offline':
             assert '192.168.31.123' not in visible and '--.--.--.--' in visible
+        if name == 'system':
+            assert '85%' in visible
+        if name == 'system-unknown':
+            assert '--%' in visible
+        if name == 'charging':
+            assert 'CHG' in visible and '28%' not in visible
+        if name == 'full':
+            assert '100%' in visible
         (output / f'{name}.png').write_bytes(render_commands(commands))
         figures.append(f'<figure><img src="{name}.png" alt="{html.escape(name)}"><figcaption>{html.escape(name)}</figcaption></figure>')
     (output / 'index.html').write_text('''<!doctype html><html lang="zh-CN"><meta charset="utf-8">

@@ -239,7 +239,13 @@ void draw_network_page(const ui_model_t *m, unsigned screen)
         snprintf(text, sizeof(text), "--.--- V");
     }
     rlcd_text(30, 213, text, 2);
-    if (m->battery.valid && m->battery.detected) {
+    // Same state-of-charge semantics as the header; voltage stays on the line above.
+    if (m->battery.power_state == BATTERY_POWER_CHARGING) {
+        snprintf(text, sizeof(text), "CHG");
+    } else if (m->battery.power_state == BATTERY_POWER_FULL) {
+        snprintf(text, sizeof(text), "100%%");
+    } else if (m->battery.valid && m->battery.detected && m->battery.percent_valid &&
+               m->battery.power_state == BATTERY_POWER_DISCHARGING) {
         snprintf(text, sizeof(text), "%u%% EST", m->battery.percent);
     } else {
         snprintf(text, sizeof(text), "--%% EST");

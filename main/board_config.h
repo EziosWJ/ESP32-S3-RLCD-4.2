@@ -27,12 +27,32 @@
 
 // Factory adc_bsp.cpp: ADC1 channel 3 (GPIO 4), battery divider 1:3.
 #define BOARD_BATTERY_ADC_CHANNEL 3
-#define BOARD_BATTERY_DIVIDER_RATIO 3U
 #define BOARD_BATTERY_SAMPLE_COUNT 16U
-#define BOARD_BATTERY_EMPTY_MV 3000U
-#define BOARD_BATTERY_FULL_MV 4120U
-// Heuristic only: validate with USB power and an empty battery holder.
-#define BOARD_BATTERY_DETECT_MIN_MV 2000U
+// Calibration: pack_mv = pin_mv * RATIO_MILLI / 1000 + OFFSET_MV.
+// Measure the pack with a DMM and adjust these two values on the real board;
+// nothing else in the firmware assumes an uncalibrated divider.
+#define BOARD_BATTERY_DIVIDER_RATIO_MILLI 3000
+#define BOARD_BATTERY_MV_OFFSET 0
+// Plausible pack window. Insertion is inferred from the voltage only; a pack
+// sitting outside this window is reported as not detected.
+#define BOARD_BATTERY_DETECT_MIN_MV 2500U
+#define BOARD_BATTERY_DETECT_MAX_MV 4400U
+// Charging: pack voltage at or above this value, or a rise of at least
+// BOARD_BATTERY_CHARGE_RISE_MV inside BOARD_BATTERY_CHARGE_RISE_WINDOW_MS.
+#define BOARD_BATTERY_CHARGE_DETECT_MV 4150U
+#define BOARD_BATTERY_CHARGE_RISE_MV 40U
+#define BOARD_BATTERY_CHARGE_RISE_WINDOW_MS 300000U
+// Full: unplugged, resting at or above this voltage for the rest window.
+#define BOARD_BATTERY_FULL_REST_MV 4050U
+#define BOARD_BATTERY_FULL_REST_MS 600000U
+// State of charge smoothing: resting minimum over the window, +/- hysteresis
+// before the shown percent may move, and a rate limit per minute.
+#define BOARD_BATTERY_SOC_REST_WINDOW_MS 60000U
+#define BOARD_BATTERY_SOC_HYSTERESIS_PERCENT 3U
+#define BOARD_BATTERY_SOC_MAX_CHANGE_PER_MIN 2U
+// Display side: quantize before comparing, and require a stable period first.
+#define BOARD_BATTERY_DISPLAY_VOLTAGE_STEP_MV 10U
+#define BOARD_BATTERY_DISPLAY_DEBOUNCE_MS 200U
 
 // KEY: active-low GPIO 18, verified against the local factory button_bsp.c.
 #define BOARD_KEY_GPIO 18
@@ -50,12 +70,25 @@
 #define BOARD_NTP_SERVER "ntp.aliyun.com"
 
 #define BOARD_HA_URL "http://192.168.31.41:8123"
-#define BOARD_HA_POLL_INTERVAL_MS 15000U
-#define BOARD_HA_TIMEOUT_MS 4000U
-#define BOARD_HA_STALE_MS 45000U
+// One request per poll for all entities; the worker never opens one TCP
+// connection per entity in the steady state.
+#define BOARD_HA_POLL_INTERVAL_MS 60000U
+#define BOARD_HA_TIMEOUT_MS 8000U
+#define BOARD_HA_STALE_MS 180000U
 
 // Only the read-only device snapshot route is used by the Codeck client.
 #define BOARD_CODECK_SNAPSHOT_URL "https://codeck.wangj.de/api/device/v1/snapshot"
 #define BOARD_CODECK_TIMEOUT_MS 20000
+// Poll only while the CODECK page is visible, on battery-friendly intervals.
+#define BOARD_CODECK_POLL_INTERVAL_MS 300000U
 #define BOARD_CODECK_RECONNECT_FAILURES 3U
 #define BOARD_CODECK_RECONNECT_COOLDOWN_MS 300000U
+
+// Power management: dynamic frequency scaling window and automatic light sleep.
+// The maximum must match CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ.
+#define BOARD_PM_MAX_FREQ_MHZ 80
+#define BOARD_PM_MIN_FREQ_MHZ 40
+#define BOARD_PM_LIGHT_SLEEP_ENABLE 1
+// Light sleep is suspended while a USB host is attached, so the USB Serial/JTAG
+// console stays usable; the firmware re-probes attachment at this interval.
+#define BOARD_PM_USB_PROBE_INTERVAL_MS 10000U

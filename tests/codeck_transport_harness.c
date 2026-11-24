@@ -118,7 +118,7 @@ int main(int argc,char **argv)
     for (unsigned i=0;i<4;++i) schedule_result(&r,CODECK_TLS_ERROR,true,64000+i*30000,0);
     assert(reconnects==1); // cooldown persists across reconnection
     schedule_result(&r,CODECK_OK,false,155000,0);
-    assert(r.failures==0 && r.next_poll_ms==200000);
+    assert(r.failures==0 && r.next_poll_ms==455000);
     for (unsigned i=0;i<3;++i) schedule_result(&r,CODECK_TLS_ERROR,false,200000+i*60000,0);
     assert(reconnects==1 && r.transport_failures==0); // invalid cert never bounces Wi-Fi
     schedule_result(&r,CODECK_AUTH_ERROR,false,400000,0);

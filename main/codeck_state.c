@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "board_config.h"
 #include "cJSON.h"
 
 static const cJSON *field(const cJSON *o, const char *name) { return cJSON_GetObjectItemCaseSensitive(o, name); }
@@ -171,7 +172,7 @@ void codeck_state_failure(codeck_snapshot_t *last, codeck_status_t error)
 }
 unsigned codeck_retry_delay(codeck_status_t status, unsigned failures, uint32_t random)
 {
-    if (status == CODECK_OK) return 45000;
+    if (status == CODECK_OK) return BOARD_CODECK_POLL_INTERVAL_MS;
     if (status == CODECK_AUTH_ERROR || status == CODECK_NO_KEY) return 15U*60U*1000U;
     unsigned shift = failures ? failures-1 : 0;
     if (shift > 5) shift = 5;

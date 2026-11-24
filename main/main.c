@@ -26,6 +26,7 @@
 #include "home_assistant.h"
 #include "clock_service.h"
 #include "codeck_client.h"
+#include "power.h"
 
 static const char *TAG = "rlcd";
 
@@ -129,6 +130,12 @@ void app_main(void)
 
     update_heap_sizes(&memory);
     ui_update_memory_info(&memory);
+
+    const esp_err_t power_err = power_management_init();
+    if (power_err != ESP_OK) {
+        ESP_LOGW(TAG, "Power management initialization failed (non-fatal): %s",
+                 esp_err_to_name(power_err));
+    }
 
     int64_t next_sample = esp_timer_get_time() / 1000;
     int64_t next_memory_sample = next_sample + 30000;

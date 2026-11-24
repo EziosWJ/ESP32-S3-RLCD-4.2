@@ -1,5 +1,6 @@
 #include "ui_chrome.h"
 #include <stdio.h>
+#include "battery.h"
 #include "rlcd.h"
 
 void ui_draw_card(int x, int y, int width, int height)
@@ -54,11 +55,29 @@ void ui_draw_header(const char *title, const ui_header_t *h, unsigned screen, un
     }
     rlcd_rect(285, 15, 23, 14);
     rlcd_rect(308, 19, 3, 6);
-    if (h->battery_valid) {
-        const int width = (int)(h->battery_percent * 19 / 100);
-        for (int r = 18; r < 26; ++r) rlcd_hline(287, r, width);
-        snprintf(text, sizeof(text), "%u%%", h->battery_percent);
-    } else snprintf(text, sizeof(text), "--%%");
+    // Discharging with a trustworthy estimate: "NN%" and a percent bar.
+    // Charging: "CHG", bar left empty, no percent. Full: "100%" full bar.
+    // Anything else (unknown / not detected): "--%", empty bar.
+    unsigned fill_width = 0;
+    bool filled = false;
+    if (h->battery_charging) {
+        snprintf(text, sizeof(text), "CHG");
+    } else if (h->battery_full) {
+        snprintf(text, sizeof(text), "100%%");
+        fill_width = 19;
+        filled = true;
+    } else if (h->battery_valid && h->battery_percent_valid &&
+               h->battery_state == BATTERY_POWER_DISCHARGING) {
+        unsigned percent = h->battery_percent > 100 ? 100 : h->battery_percent;
+        snprintf(text, sizeof(text), "%u%%", percent);
+        fill_width = percent * 19U / 100U;
+        filled = true;
+    } else {
+        snprintf(text, sizeof(text), "--%%");
+    }
+    if (filled) {
+        for (int r = 18; r < 26; ++r) rlcd_hline(287, r, (int)fill_width);
+    }
     rlcd_text(321, 16, text, 2);
     rlcd_text(20, 39, "UTC+8", 1);
     snprintf(text, sizeof(text), "%u/%u", screen + 1, count);

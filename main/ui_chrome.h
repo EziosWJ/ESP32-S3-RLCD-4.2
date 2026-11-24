@@ -1,8 +1,14 @@
 #pragma once
 #include <stdbool.h>
+#include "battery.h"
 
 typedef struct {
     bool time_valid, connected, connecting, signal_valid, battery_valid;
+    // Battery display semantics: percent_valid means the shown percent is a
+    // trustworthy state-of-charge; charging suppresses the percent, full draws
+    // a full bar. Unknown / not detected falls back to "--%".
+    bool battery_percent_valid, battery_charging, battery_full;
+    battery_power_state_t battery_state;
     char time[6];
     int rssi;
     unsigned battery_percent;

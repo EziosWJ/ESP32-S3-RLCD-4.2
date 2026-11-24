@@ -47,6 +47,7 @@ int main(int argc,char **argv) {
     if(fread(font,1,921600,file)!=921600) return 6;
     fclose(file); codeck_font_use(font);
     const ui_header_t header = {.time_valid=true,.connected=true,.signal_valid=true,.battery_valid=true,
+                                .battery_percent_valid=true,.battery_state=BATTERY_POWER_DISCHARGING,
                                 .time="14:20",.rssi=-60,.battery_percent=85};
     ui_draw_header("CODECK", &header, (unsigned)atoi(argv[3]), codeck_page_count(&snapshot));
     draw_codeck_page(&snapshot,(unsigned)atoi(argv[3]));
@@ -91,7 +92,7 @@ int main(int argc,char **argv) {
 Codex CLI 与剩余额度为第一页，随后每屏两个账户；全部币种保留在所属账户卡片中。中文配置名最多两行。</p>
 <nav id="states"></nav><div id="pages"></div><p>KEY 单击切换顶层页面，BOOT 单击翻屏，末屏回首屏并保留阅读位置。无自动翻屏和固定 Footer。
 请求失败时保留最后成功快照，内容区显示原因、LAST KNOWN、CACHED 和最后快照生成时间。
-401 每 15 分钟最多重试一次，正常轮询间隔 45 秒；普通错误指数退避并加入抖动。</p></main><script>const screens=SCREENS;const buttons=screens.map((s,i)=>{const b=document.createElement('button');b.textContent=s.name;b.onclick=()=>show(i);document.getElementById('states').append(b);return b;});function show(i){const pages=document.getElementById('pages');pages.replaceChildren();screens[i].images.forEach((src,j)=>{const f=document.createElement('figure');const img=document.createElement('img');img.src=src;img.alt='Codeck page '+(j+1);const c=document.createElement('figcaption');c.textContent=(j+1)+' / '+screens[i].images.length;f.append(img,c);pages.append(f);});buttons.forEach((b,j)=>b.setAttribute('aria-pressed',String(i===j)));}show(0);</script></html>'''
+401 每 15 分钟最多重试一次，正常轮询间隔 300 秒，且仅在 CODECK 页面可见时请求；普通错误指数退避并加入抖动。</p></main><script>const screens=SCREENS;const buttons=screens.map((s,i)=>{const b=document.createElement('button');b.textContent=s.name;b.onclick=()=>show(i);document.getElementById('states').append(b);return b;});function show(i){const pages=document.getElementById('pages');pages.replaceChildren();screens[i].images.forEach((src,j)=>{const f=document.createElement('figure');const img=document.createElement('img');img.src=src;img.alt='Codeck page '+(j+1);const c=document.createElement('figcaption');c.textContent=(j+1)+' / '+screens[i].images.length;f.append(img,c);pages.append(f);});buttons.forEach((b,j)=>b.setAttribute('aria-pressed',String(i===j)));}show(0);</script></html>'''
     (output / 'index.html').write_text(html.replace('SCREENS', json.dumps(screens, ensure_ascii=False)), encoding='utf-8')
     print('Rendered snapshot pages; glyphs, bounds and graphic/text overlaps checked.')
     print(output / 'index.html')
