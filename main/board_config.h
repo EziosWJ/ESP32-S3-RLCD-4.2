@@ -69,7 +69,7 @@
 #define BOARD_TIMEZONE "CST-8"
 #define BOARD_NTP_SERVER "ntp.aliyun.com"
 
-#define BOARD_HA_URL "http://192.168.31.41:8123"
+#define BOARD_HA_URL "http://10.126.31.41:8123"
 // One request per poll for all entities; the worker never opens one TCP
 // connection per entity in the steady state.
 #define BOARD_HA_POLL_INTERVAL_MS 60000U
