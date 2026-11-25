@@ -178,6 +178,15 @@ bool ha_state_parse_template_envelope(const char *json, char *inner, size_t inne
         const size_t length = strlen(result->valuestring);
         valid = length > 0 && length < inner_size;
         if (valid) memcpy(inner, result->valuestring, length + 1);
+    } else if (cJSON_IsObject(root)) {
+        // HA's /api/template returns the rendered text directly (Content-Type
+        // text/plain), not the legacy {"result":"..."} envelope. Accept the
+        // plain JSON object as the inner object when no result key is present.
+        const size_t length = strlen(json);
+        if (length > 0 && length < inner_size) {
+            memcpy(inner, json, length + 1);
+            valid = true;
+        }
     }
     cJSON_Delete(root);
     return valid;

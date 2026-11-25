@@ -5,8 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -24,6 +26,21 @@
 static const char *TAG = "home_assistant";
 static QueueHandle_t snapshots;
 static char authorization[HA_TOKEN_MAX + 8];
+
+// Response scratch and the snapshot queue are CPU-only: prefer PSRAM and fall
+// back to internal RAM when PSRAM is unavailable.
+static void *psram_malloc(size_t size)
+{
+    void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p != NULL ? p : malloc(size);
+}
+
+static QueueHandle_t snapshot_queue(size_t item_size)
+{
+    QueueHandle_t queue =
+        xQueueCreateWithCaps(1, item_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return queue != NULL ? queue : xQueueCreate(1, item_size);
+}
 
 // One slot per displayed value. host < 0 marks a device sensor; otherwise it
 // is the host metric index in ha_host_entity_t.
@@ -201,12 +218,16 @@ static ha_round_result_t fetch_template(esp_http_client_handle_t client, char *r
         err = written == request_len ? ESP_OK : ESP_FAIL;
     }
     if (err != ESP_OK) {
+        ESP_LOGW(TAG, "template transport failed: %s (errno=%d)", esp_err_to_name(err),
+                 esp_http_client_get_errno(client));
         return HA_ROUND_READ_ERROR;
     }
     if (esp_http_client_fetch_headers(client) < 0) {
+        ESP_LOGW(TAG, "template headers failed (errno=%d)", esp_http_client_get_errno(client));
         return HA_ROUND_READ_ERROR;
     }
     const int status = esp_http_client_get_status_code(client);
+    ESP_LOGI(TAG, "template status=%d", status);
     // /api/template requires administrator rights. A valid token without
     // admin permission still has working /api/states, so do not convict the
     // whole round on a template 401/403: degrade to the per-entity GET path
@@ -218,6 +239,9 @@ static ha_round_result_t fetch_template(esp_http_client_handle_t client, char *r
         return HA_ROUND_READ_ERROR;
     }
     const int length = esp_http_client_read_response(client, response_body, HA_BODY_SIZE - 1);
+    ESP_LOGI(TAG, "template body length=%d complete=%d errno=%d", length,
+             esp_http_client_is_complete_data_received(client) ? 1 : 0,
+             esp_http_client_get_errno(client));
     if (length <= 0 || length >= HA_BODY_SIZE - 1 ||
         !esp_http_client_is_complete_data_received(client)) {
         return HA_ROUND_READ_ERROR;
@@ -247,9 +271,12 @@ static ha_round_result_t fetch_fallback(esp_http_client_handle_t client, char *b
         if (err != ESP_OK || esp_http_client_open(client, 0) != ESP_OK ||
             esp_http_client_fetch_headers(client) < 0) {
             // Transport failure aborts the round; the caller keeps the old snapshot.
+            ESP_LOGW(TAG, "fallback %s transport failed: %s errno=%d", slot->entity,
+                     esp_err_to_name(err), esp_http_client_get_errno(client));
             return HA_ROUND_READ_ERROR;
         }
         const int status = esp_http_client_get_status_code(client);
+        ESP_LOGI(TAG, "fallback %s status=%d", slot->entity, status);
         if (status == 401 || status == 403) {
             return HA_ROUND_AUTH;
         }
@@ -289,6 +316,7 @@ static ha_round_result_t fetch_fallback(esp_http_client_handle_t client, char *b
                 value->status = HA_LIVE;
                 continue;
             }
+            ESP_LOGI(TAG, "fallback %s parse failed", slot->entity);
             value->status = HA_OFFLINE;
         } else {
             // Drain a non-200 body so the keep-alive connection stays in sync.
@@ -309,8 +337,8 @@ static ha_round_result_t fetch_fallback(esp_http_client_handle_t client, char *b
 static void worker(void *arg)
 {
     ha_snapshot_t snapshot = {0};
-    char *body = malloc(HA_BODY_SIZE);
-    char *inner = malloc(HA_BODY_SIZE);
+    char *body = psram_malloc(HA_BODY_SIZE);
+    char *inner = psram_malloc(HA_BODY_SIZE);
     if (!body || !inner) {
         set_status(&snapshot, HA_READ_ERROR);
         xQueueOverwrite(snapshots, &snapshot);
@@ -363,6 +391,7 @@ static void worker(void *arg)
                 }
                 esp_http_client_cleanup(client);
             }
+            ESP_LOGI(TAG, "round=%d template_ok=%d", (int)round, template_succeeded ? 1 : 0);
 
             if (round == HA_ROUND_AUTH) {
                 set_status(&scratch, HA_AUTH_ERROR);
@@ -398,7 +427,7 @@ static void worker(void *arg)
 
 esp_err_t home_assistant_init(void)
 {
-    snapshots = xQueueCreate(1, sizeof(ha_snapshot_t));
+    snapshots = snapshot_queue(sizeof(ha_snapshot_t));
     if (!snapshots) return ESP_ERR_NO_MEM;
     ha_snapshot_t snapshot = {0};
     if (!load_token()) {

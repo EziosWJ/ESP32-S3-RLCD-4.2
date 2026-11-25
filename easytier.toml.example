@@ -1,0 +1,18 @@
+# EasyTier bring-up template. Copy to easytier.toml and fill the real values.
+# easytier.toml is gitignored because it contains the shared network secret.
+instance_name = "esp32-rlcd-42"
+hostname = "esp32-rlcd-42"
+# Use a free IP in the target overlay subnet. Do not duplicate an address that
+# already exists on the target LAN.
+ipv4 = "10.144.144.10/24"
+
+[network_identity]
+network_name = "REPLACE_ME"
+network_secret = "REPLACE_ME"
+
+[[peer]]
+uri = "tcp://REPLACE_ME:11030"
+
+[flags]
+mtu = 1380
+enable_encryption = true

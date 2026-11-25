@@ -13,9 +13,20 @@ dependencies:
     source:
       type: idf
     version: 6.1.0
+  myqfeng/easytier-esp:
+    component_hash: be65fd68fb4bebe9101ace3a623a3852f7e72f66a118a1329fb7a003f39dedb4
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=6.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 0.1.0
 direct_dependencies:
 - espressif/cjson
 - idf
-manifest_hash: f4c304a63e241667a94917d1648e04e4e935cfd5a0bb51b2f83bcd958ff4e962
+- myqfeng/easytier-esp
+manifest_hash: 4f07cb0691b07eadad49c1f7f4e74b548252bb6335056df97d8ead5d8e8be2bf
 target: esp32s3
 version: 3.0.0

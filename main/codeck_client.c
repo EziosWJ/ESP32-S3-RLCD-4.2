@@ -2,12 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_tls_errors.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "clock_service.h"
@@ -20,6 +22,27 @@ static const char *TAG = "codeck";
 // Page visibility gate: set by the UI when the CODECK page is shown/hidden.
 // While hidden the worker must not open a request, TLS session or Wi-Fi recovery.
 static volatile bool page_visible = false;
+
+// Snapshot state and its queue are CPU-only: prefer PSRAM, fall back to
+// internal RAM so the firmware still starts if PSRAM is unavailable.
+static void *psram_calloc(size_t count, size_t size)
+{
+    void *p = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p != NULL ? p : calloc(count, size);
+}
+
+static void *psram_malloc(size_t size)
+{
+    void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p != NULL ? p : malloc(size);
+}
+
+static QueueHandle_t snapshot_queue(size_t item_size)
+{
+    QueueHandle_t queue =
+        xQueueCreateWithCaps(1, item_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return queue != NULL ? queue : xQueueCreate(1, item_size);
+}
 
 static bool load_key(void)
 {
@@ -165,8 +188,9 @@ static void schedule_result(recovery_t *r, codeck_status_t result, bool recovera
 
 static void worker(void *arg)
 {
-    codeck_snapshot_t *last = calloc(1,sizeof(*last)), *scratch = calloc(1,sizeof(*scratch));
-    char *body = malloc(CODECK_BODY_LIMIT+1);
+    codeck_snapshot_t *last = psram_calloc(1, sizeof(*last)),
+                      *scratch = psram_calloc(1, sizeof(*scratch));
+    char *body = psram_malloc(CODECK_BODY_LIMIT + 1);
     if (!last || !scratch || !body) {
         if(last) { codeck_state_failure(last,CODECK_CAPACITY_ERROR); xQueueOverwrite(snapshots,last); }
         free(last); free(scratch); free(body);
@@ -230,9 +254,9 @@ esp_err_t codeck_client_init(void)
 {
     // The SDK's debug HTTP headers include Authorization; suppress that tag.
     esp_log_level_set("HTTP_CLIENT",ESP_LOG_WARN);
-    snapshots=xQueueCreate(1,sizeof(codeck_snapshot_t));
+    snapshots=snapshot_queue(sizeof(codeck_snapshot_t));
     if(!snapshots) return ESP_ERR_NO_MEM;
-    codeck_snapshot_t *initial=calloc(1,sizeof(*initial));
+    codeck_snapshot_t *initial=psram_calloc(1,sizeof(*initial));
     if(!initial) return ESP_ERR_NO_MEM;
     const bool key_ok=load_key();
     initial->status=key_ok ? CODECK_NETWORK_ERROR : CODECK_NO_KEY;

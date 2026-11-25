@@ -27,8 +27,92 @@
 #include "clock_service.h"
 #include "codeck_client.h"
 #include "power.h"
+#include "easytier_link.h"
 
 static const char *TAG = "rlcd";
+static const char *MESH_TAG = "easytier";
+
+static const char *easytier_state_name(easytier_state_t state)
+{
+    switch (state) {
+    case EASYTIER_STATE_UNINITIALIZED: return "UNINITIALIZED";
+    case EASYTIER_STATE_STOPPED: return "STOPPED";
+    case EASYTIER_STATE_WAITING_UNDERLAY: return "WAITING_UNDERLAY";
+    case EASYTIER_STATE_CONNECTING: return "CONNECTING";
+    case EASYTIER_STATE_HANDSHAKING: return "HANDSHAKING";
+    case EASYTIER_STATE_SYNCING: return "SYNCING";
+    case EASYTIER_STATE_READY: return "READY";
+    case EASYTIER_STATE_STOPPING: return "STOPPING";
+    case EASYTIER_STATE_ERROR: return "ERROR";
+    }
+    return "UNKNOWN";
+}
+
+static const char *ha_status_name(ha_value_status_t status)
+{
+    switch (status) {
+    case HA_READING: return "READING";
+    case HA_LIVE: return "LIVE";
+    case HA_OFFLINE: return "OFFLINE";
+    case HA_AUTH_ERROR: return "AUTH_ERROR";
+    case HA_NOT_FOUND: return "NOT_FOUND";
+    case HA_READ_ERROR: return "READ_ERROR";
+    case HA_NO_TOKEN: return "NO_TOKEN";
+    case HA_STALE: return "STALE";
+    }
+    return "UNKNOWN";
+}
+
+static void print_resource_status(void)
+{
+    const uint32_t internal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    const uint32_t psram = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    const size_t internal_free = heap_caps_get_free_size(internal);
+    const size_t internal_low = heap_caps_get_minimum_free_size(internal);
+    const size_t internal_max = heap_caps_get_largest_free_block(internal);
+    const size_t psram_total = heap_caps_get_total_size(psram);
+    const size_t psram_free = heap_caps_get_free_size(psram);
+    ESP_LOGI(MESH_TAG,
+             "heap: int_free=%u int_low=%u int_max=%u psram_total=%u psram_free=%u psram_used=%u",
+             (unsigned)internal_free, (unsigned)internal_low, (unsigned)internal_max,
+             (unsigned)psram_total, (unsigned)psram_free,
+             (unsigned)(psram_total - psram_free));
+}
+
+static void format_virtual_ipv4(uint32_t address, char out[16])
+{
+    if (address == 0) {
+        snprintf(out, 16, "-");
+        return;
+    }
+    snprintf(out, 16, "%u.%u.%u.%u",
+             (unsigned)((address >> 24) & 0xffU),
+             (unsigned)((address >> 16) & 0xffU),
+             (unsigned)((address >> 8) & 0xffU),
+             (unsigned)(address & 0xffU));
+}
+
+static void print_mesh_status(bool easytier_ready)
+{
+    print_resource_status();
+    ha_snapshot_t ha = {0};
+    home_assistant_get_snapshot(&ha);
+    ESP_LOGI(MESH_TAG, "ha: device1 temp=%s humidity=%s",
+             ha_status_name(ha.devices[0].temperature.status),
+             ha_status_name(ha.devices[0].humidity.status));
+    easytier_status_t mesh = {0};
+    if (!easytier_ready || easytier_status(&mesh) != ESP_OK) {
+        ESP_LOGI(MESH_TAG, "mesh: DISABLED (easytier.toml placeholders or start failure)");
+        return;
+    }
+    char ip[16];
+    format_virtual_ipv4(mesh.virtual_ipv4, ip);
+    const char *error = mesh.last_error == ESP_OK ? "OK" : esp_err_to_name(mesh.last_error);
+    ESP_LOGI(MESH_TAG,
+             "mesh: state=%s ip=%s peers=%u routes=%u err=%s dropped=%" PRIu64,
+             easytier_state_name(mesh.state), ip, (unsigned)mesh.direct_peers,
+             (unsigned)mesh.reachable_routes, error, mesh.dropped_packets);
+}
 
 static void read_app_image_size(ui_memory_info_t *memory)
 {
@@ -101,6 +185,18 @@ void app_main(void)
             ESP_LOGW(TAG, "Clock initialization failed: %s", esp_err_to_name(clock_err));
         }
     }
+    // The release default is WARN; keep the 10-second mesh summary visible
+    // without turning on INFO for the rest of the firmware.
+    esp_log_level_set(MESH_TAG, ESP_LOG_INFO);
+    bool easytier_ready = false;
+    if (wifi_available) {
+        const esp_err_t easytier_err = easytier_start();
+        if (easytier_err == ESP_OK) {
+            easytier_ready = true;
+        } else {
+            ESP_LOGW(TAG, "EasyTier disabled: %s", esp_err_to_name(easytier_err));
+        }
+    }
     ESP_ERROR_CHECK(button_init());
     const ui_system_info_t system = {
         .flash_bytes = flash_size,
@@ -139,6 +235,8 @@ void app_main(void)
 
     int64_t next_sample = esp_timer_get_time() / 1000;
     int64_t next_memory_sample = next_sample + 30000;
+    int64_t next_mesh_sample = next_sample + 10000;
+    bool wifi_was_connected = false;
     TickType_t last_wake = xTaskGetTickCount();
     while (true) {
         const button_event_t event = button_poll();
@@ -152,6 +250,29 @@ void app_main(void)
             }
         }
         const int64_t now = esp_timer_get_time() / 1000;
+        // Wi-Fi CONNECTED edges drive mesh connect/disconnect. The component
+        // must see connect() again after every reconnect.
+        if (wifi_available) {
+            wifi_setup_status_t wifi = {0};
+            wifi_setup_get_status(&wifi);
+            const bool wifi_connected = wifi.state == WIFI_SETUP_CONNECTED;
+            if (wifi_connected != wifi_was_connected) {
+                wifi_was_connected = wifi_connected;
+                if (easytier_ready) {
+                    const esp_err_t link_err =
+                        wifi_connected ? easytier_connect() : easytier_disconnect();
+                    if (link_err != ESP_OK) {
+                        ESP_LOGW(TAG, "EasyTier %s failed: %s",
+                                 wifi_connected ? "connect" : "disconnect",
+                                 esp_err_to_name(link_err));
+                    }
+                }
+            }
+        }
+        if (now >= next_mesh_sample) {
+            print_mesh_status(easytier_ready);
+            next_mesh_sample = now + 10000;
+        }
         if (now >= next_memory_sample) {
             update_heap_sizes(&memory);
             ui_update_memory_info(&memory);
